@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Race Panel v0.0.0 — Teacher</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div>
+        <h1>Race Panel <span class="badge">v0.0.0</span> — Teacher</h1>
+        <div class="sub">Modo oscuro fijo. WS + timestamp del servidor.</div>
+      </div>
+      <div class="sub" id="wsInfo">WS: —</div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div>
+          <label>Teacher Key (env TEACHER_KEY)</label>
+          <input id="teacherKey" placeholder="LOCAL_DEV" />
+        </div>
+        <div style="flex: 1 1 120px;">
+          <label>&nbsp;</label>
+          <button id="btnAuth" class="btn-accent">Entrar</button>
+        </div>
+      </div>
+      <div class="small" id="authStatus">No autenticado.</div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div>
+          <label>PIN de clase (lo dices en voz alta)</label>
+          <input id="classPin" placeholder="SAM-2026-02-13" />
+        </div>
+        <div style="flex: 1 1 140px;">
+          <label>&nbsp;</label>
+          <button id="btnSetPin">Guardar PIN</button>
+        </div>
+      </div>
+      <div class="small">Los alumnos entran con <b>ID + PIN</b>. Sin passwords en 0.0.0.</div>
+    </div>
+
+<div>
+  <label>
+    <input type="checkbox" id="autoCloseChk" />
+    Cerrar automáticamente al llegar a N perfectos
+  </label>
+</div>
+
+    <div class="card">
+      <div class="row">
+        <div style="flex: 1 1 160px;">
+          <label>Número de incisos</label>
+          <input id="numPrompts" type="number" min="1" value="3" />
+        </div>
+        <div style="flex: 1 1 200px;">
+          <label>Política de ganadores</label>
+          <select id="winnerMode">
+            <option value="topNPerfect" selected>Top N perfectos</option>
+            <option value="allPerfect">Todos los perfectos</option>
+          </select>
+        </div>
+        <div style="flex: 1 1 120px;">
+          <label>N (si Top N)</label>
+          <input id="winnerN" type="number" min="1" value="3" />
+        </div>
+        <div style="flex: 1 1 160px;">
+          <label>Round ID (opcional)</label>
+          <input id="roundId" placeholder="R-001" />
+        </div>
+      </div>
+
+      <div class="btnbar">
+        <button id="btnBuild">Generar incisos</button>
+        <button id="btnSave" class="btn-accent">Guardar ronda</button>
+        <button id="btnOpen" class="btn-warn">Abrir ronda</button>
+        <button id="btnClose" class="btn-warn">Cerrar ronda</button>
+        <button id="btnGrade" class="btn-ok">Calificar</button>
+        <button id="btnReset" class="btn-danger">Reset envíos</button>
+        <button id="btnExport">Exp JSON</button>
+      </div>
+
+      <hr />
+
+      <div id="promptsArea" class="note">Genera incisos para editar aquí.</div>
+    </div>
+
+    <div class="card">
+      <div class="kpi">
+        <div>Estado ronda: <span class="badge" id="roundStatus">—</span></div>
+        <div>Envios: <span class="badge" id="subCount">0</span></div>
+        <div>Ganadores (IDs): <span class="badge" id="winnerIds">—</span></div>
+      </div>
+
+      <div class="btnbar">
+        <button id="btnCopyWinners">Copiar ganadores</button>
+      </div>
+
+      <div id="resultsArea"></div>
+    </div>
+  </div>
+
+  <script src="/teacher.js"></script>
+</body>
+</html>
