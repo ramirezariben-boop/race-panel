@@ -19,6 +19,8 @@ const btnClose = document.getElementById("btnClose");
 const btnGrade = document.getElementById("btnGrade");
 const btnReset = document.getElementById("btnReset");
 const btnExport = document.getElementById("btnExport");
+const btnExportExtras = document.getElementById("btnExportExtras");
+
 const promptsArea = document.getElementById("promptsArea");
 
 const roundStatusEl = document.getElementById("roundStatus");
@@ -154,6 +156,21 @@ function handleMsg(msg) {
     a.download = `race-panel-${msg.payload.sessionId}.json`;
     a.click();
     setStatus("JSON exportado.", "ok");
+    return;
+  }
+
+  if (msg.type === "export_extras") {
+    const blob = new Blob(
+      [JSON.stringify(msg.payload, null, 2)],
+      { type: "application/json" }
+    );
+
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `extras-${msg.payload.sessionId}.json`;
+    a.click();
+
+    setStatus("Puntos extra exportados.", "ok");
     return;
   }
 
@@ -329,6 +346,14 @@ btnExport.onclick = () => {
   ws.send(JSON.stringify({
     type: "teacher_export_json",
     sessionId: classPinEl.value || "SESSION",
+  }));
+};
+
+btnExportExtras.onclick = () => {
+  ws.send(JSON.stringify({
+    type: "teacher_export_extras",
+    sessionId: classPinEl.value || "SESSION",
+    minPoints: 1
   }));
 };
 

@@ -106,6 +106,23 @@ function computeWinners(round) {
   return perfect.slice(0, Math.max(0, N)).map((s) => s.studentId);
 }
 
+function computeAccumulatedExtras(roundsHistory, minPoints = 1) {
+  const totals = {};
+
+  for (const round of roundsHistory) {
+    for (const r of round.results || []) {
+      const id = String(r.studentId);
+      const pts = Number(r.scoreTotal || 0);
+      totals[id] = (totals[id] || 0) + pts;
+    }
+  }
+
+  // filtrar >= minPoints
+  return Object.fromEntries(
+    Object.entries(totals).filter(([_, pts]) => pts >= minPoints)
+  );
+}
+
 function send(ws, obj) {
   if (ws.readyState === 1) ws.send(JSON.stringify(obj));
 }
@@ -390,6 +407,26 @@ console.log("WS MSG:", meta?.role, msg.type);
     rounds: state.roundsHistory,
   };
   send(ws, { type: "export_json", payload });
+  return;
+}
+
+if (meta.role === "teacher" && msg.type === "teacher_export_extras") {
+  const min = Number(msg.minPoints ?? 1);
+
+  const extras = computeAccumulatedExtras(
+    state.roundsHistory,
+    min
+  );
+
+  send(ws, {
+    type: "export_extras",
+    payload: {
+      sessionId: msg.sessionId || "SESSION",
+      exportedAt: nowMs(),
+      minPoints: min,
+      extras
+    }
+  });
   return;
 }
 
