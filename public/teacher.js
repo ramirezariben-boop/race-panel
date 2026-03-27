@@ -30,6 +30,13 @@ const winnerIdsEl = document.getElementById("winnerIds");
 const btnCopyWinners = document.getElementById("btnCopyWinners");
 const resultsArea = document.getElementById("resultsArea");
 
+const btnImportJson = document.getElementById("btnImportJson");
+const btnExportRoundJson = document.getElementById("btnExportRoundJson");
+const fileJson = document.getElementById("fileJson");
+
+const roundsSelect = document.getElementById("roundsSelect");
+const btnLoadRoundFromLibrary = document.getElementById("btnLoadRoundFromLibrary");
+
 let ws;
 let isAuthed = false;
 let currentRound = null;
@@ -366,6 +373,151 @@ btnCopyWinners.onclick = async () => {
     setStatus("No se pudo copiar (permiso del navegador).", "error");
   }
 };
+
+btnImportJson.onclick = () => {
+  fileJson.click();
+};
+
+fileJson.onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const text = await file.text();
+
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return setStatus("JSON inválido", "error");
+  }
+
+  if (!data.prompts) {
+    return setStatus("JSON no tiene prompts", "error");
+  }
+
+  // llenar UI
+  buildPromptsUI(data.prompts.length);
+
+  const cards = promptsArea.querySelectorAll(".card");
+
+  data.prompts.forEach((p, i) => {
+    const card = cards[i];
+    if (!card) return;
+
+    card.querySelector(".p-label").value = p.label || "";
+    card.querySelector(".p-type").value = p.type || "dropdown";
+    card.querySelector(".p-options").value = (p.options || []).join(",");
+    card.querySelector(".p-correct").value = p.correct || "";
+    card.querySelector(".p-points").value = p.points ?? 1;
+  });
+
+  // winners policy
+  if (data.winnersPolicy) {
+    winnerModeEl.value = data.winnersPolicy.mode || "topNPerfect";
+    winnerNEl.value = data.winnersPolicy.N || 3;
+
+    const autoCloseChk = document.getElementById("autoCloseChk");
+    if (autoCloseChk) {
+      autoCloseChk.checked = !!data.winnersPolicy.autoClose;
+    }
+  }
+
+  if (data.roundId) {
+    roundIdEl.value = data.roundId;
+  }
+
+  setStatus("JSON cargado correctamente.", "ok");
+};
+
+btnExportRoundJson.onclick = () => {
+  const draft = collectRoundDraft();
+
+  const blob = new Blob(
+    [JSON.stringify(draft, null, 2)],
+    { type: "application/json" }
+  );
+
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `round-${draft.roundId || "sin-id"}.json`;
+  a.click();
+
+  setStatus("JSON de ronda exportado.", "ok");
+};
+
+btnLoadRoundFromLibrary.onclick = async () => {
+  const file = roundsSelect.value;
+  if (!file) return setStatus("Selecciona un archivo", "error");
+
+  try {
+    const res = await fetch(`/rounds/${file}`);
+    if (!res.ok) throw new Error("No encontrado");
+
+    const data = await res.json();
+
+    applyRoundToUI(data);
+
+    setStatus(`Cargado: ${file}`, "ok");
+  } catch (err) {
+    console.error(err);
+    setStatus("Error cargando JSON", "error");
+  }
+};
+
+function applyRoundToUI(data) {
+  if (!data.prompts) {
+    setStatus("JSON inválido (sin prompts)", "error");
+    return;
+  }
+
+  buildPromptsUI(data.prompts.length);
+
+  const cards = promptsArea.querySelectorAll(".card");
+
+  data.prompts.forEach((p, i) => {
+    const card = cards[i];
+    if (!card) return;
+
+    card.querySelector(".p-label").value = p.label || "";
+    card.querySelector(".p-type").value = p.type || "dropdown";
+    card.querySelector(".p-options").value = (p.options || []).join(",");
+    card.querySelector(".p-correct").value = p.correct || "";
+    card.querySelector(".p-points").value = p.points ?? 1;
+  });
+
+  if (data.winnersPolicy) {
+    winnerModeEl.value = data.winnersPolicy.mode || "topNPerfect";
+    winnerNEl.value = data.winnersPolicy.N || 3;
+
+    const autoCloseChk = document.getElementById("autoCloseChk");
+    if (autoCloseChk) {
+      autoCloseChk.checked = !!data.winnersPolicy.autoClose;
+    }
+  }
+
+  if (data.roundId) {
+    roundIdEl.value = data.roundId;
+  }
+}
+
+async function loadRoundLibrary() {
+  try {
+    const res = await fetch("/api/rounds");
+    const data = await res.json();
+
+    const files = data.files || [];
+
+    roundsSelect.innerHTML =
+      `<option value="">— Selecciona —</option>` +
+      files.map(f => `<option value="${f}">${f}</option>`).join("");
+
+  } catch (err) {
+    console.error(err);
+    setStatus("No se pudo cargar biblioteca", "error");
+  }
+}
+
+loadRoundLibrary();
 
 // boot
 connectWS();

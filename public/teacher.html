@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Race Panel v0.0.2 — Lehrer</title>
+  <title>Race Panel v0.0.4 — Lehrer — Rondas precargadas/Panel Preferencias</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <div class="wrap">
     <div class="header">
       <div>
-        <h1>Race Panel <span class="badge">v0.0.0</span> — Teacher</h1>
+        <h1>Race Panel <span class="badge">v0.0.4</span> — Lehrer — Rondas precargadas/Panel Preferencias</h1>
         <div class="sub">Modo oscuro fijo. WS + timestamp del servidor.</div>
       </div>
       <div class="sub" id="wsInfo">WS: —</div>
@@ -102,7 +102,30 @@
         <button id="btnCopyWinners">Copiar ganadores</button>
       </div>
 
+      <div class="btnbar">
+        <button id="btnImportJson">Cargar</button>
+	<button id="btnExportRoundJson">Guardar</button>
+	<input type="file" id="fileJson" accept=".json" style="display:none" />
+      </div>
+
       <div id="resultsArea"></div>
+
+      <div class="card">
+        <div class="row">
+          <div style="flex:2;">
+            <label>Biblioteca de rondas</label>
+            <select id="roundsSelect">
+              <option value="">— Selecciona —</option>
+            </select>
+          </div>
+
+          <div style="flex:1;">
+            <label>&nbsp;</label>
+            <button id="btnLoadRoundFromLibrary">Cargar</button>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 

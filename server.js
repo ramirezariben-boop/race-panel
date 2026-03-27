@@ -13,13 +13,18 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 // Teacher auth (simple)
 const TEACHER_KEY = process.env.TEACHER_KEY || "LOCAL_DEV";
 
-// --- In-memory state (v0.0.0) ---
+// --- In-memory state ---
 const state = {
-  classPin: "PIN-DEMO", // teacher can change
-  round: null, // { roundId, status, prompts, winnersPolicy, createdAt, openedAt, closedAt }
-  submissions: new Map(), // studentId -> Submission
-  clients: new Map(), // ws -> { role, studentId? }
+  classPin: "PIN-DEMO",
+  round: null,
+  submissions: new Map(),
+  clients: new Map(),
   roundsHistory: [],
+  actionsPanel: {
+    config: null,   // { panelId, language, buttons: [{id,label,color,priority}] }
+    status: "closed", // "draft" | "open" | "closed"
+    clicks: [],     // [{ studentId, buttonId, time }]
+  },
 };
 
 function nowMs() {
@@ -35,7 +40,6 @@ function safeJsonParse(str) {
 }
 
 function normalizeText(s) {
-  // minimal normalization: trim + collapse spaces
   return String(s ?? "")
     .trim()
     .replace(/\s+/g, " ");
@@ -52,13 +56,8 @@ function computeScoreAndPerfect(round, submission) {
 
   for (const p of round.prompts) {
     const label = String(p.label);
-    const correctRaw = String(p.correct ?? "");
-    const correct =
-      p.type === "text" ? normalizeText(correctRaw) : normalizeText(correctRaw);
-
-    const givenRaw = answersByLabel.get(label) ?? "";
-    const given =
-      p.type === "text" ? normalizeText(givenRaw) : normalizeText(givenRaw);
+    const correct = normalizeText(String(p.correct ?? ""));
+    const given = normalizeText(answersByLabel.get(label) ?? "");
 
     const ok = given === correct;
     if (ok) scoreTotal += Number(p.points ?? 0);
@@ -70,6 +69,7 @@ function computeScoreAndPerfect(round, submission) {
 
 function getPublicRound(round) {
   if (!round) return null;
+
   return {
     roundId: round.roundId,
     status: round.status,
@@ -102,6 +102,7 @@ function computeWinners(round) {
   if (round.winnersPolicy?.mode === "allPerfect") {
     return perfect.map((s) => s.studentId);
   }
+
   const N = Number(round.winnersPolicy?.N ?? 3);
   return perfect.slice(0, Math.max(0, N)).map((s) => s.studentId);
 }
@@ -117,10 +118,37 @@ function computeAccumulatedExtras(roundsHistory, minPoints = 1) {
     }
   }
 
-  // filtrar >= minPoints
   return Object.fromEntries(
     Object.entries(totals).filter(([_, pts]) => pts >= minPoints)
   );
+}
+
+function getPublicActionsPanel() {
+  const panel = state.actionsPanel || {};
+
+  const summary = {};
+  for (const click of panel.clicks || []) {
+    summary[click.buttonId] = (summary[click.buttonId] || 0) + 1;
+  }
+
+  // FORZAMOS mantener los niveles de alumnos
+  const studentCorrectionLevels = state.studentCorrectionLevels || {};
+
+  console.log(`[Servidor] Enviando panel con niveles:`, studentCorrectionLevels);
+
+  return {
+    config: panel.config ? {
+      panelId: panel.config.panelId,
+      language: panel.config.language || "de",
+      correctionLevel: Number(panel.config.correctionLevel ?? 70),
+      buttons: panel.config.buttons || [],
+    } : null,
+
+    status: panel.status || "closed",
+    clicks: panel.clicks || [],
+    summary,
+    studentCorrectionLevels: { ...studentCorrectionLevels }
+  };
 }
 
 function send(ws, obj) {
@@ -138,8 +166,10 @@ function broadcastAll(obj) {
 }
 
 function broadcastRoundState() {
-  const roundPublic = getPublicRound(state.round);
-  broadcastAll({ type: "round_state", round: roundPublic });
+  broadcastAll({
+    type: "round_state",
+    round: getPublicRound(state.round),
+  });
 }
 
 function broadcastLeaderboard() {
@@ -149,11 +179,17 @@ function broadcastLeaderboard() {
   const subs = listSubmissionsSorted();
   const winners = computeWinners(round);
 
-  // minimal leaderboard payload for teacher
   broadcastToRole("teacher", {
     type: "leaderboard_update",
     submissionsCount: subs.length,
     winners,
+  });
+}
+
+function broadcastActionsPanelState() {
+  broadcastAll({
+    type: "actions_panel_state",
+    panel: getPublicActionsPanel(),
   });
 }
 
@@ -162,7 +198,8 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   let pathname = url.pathname;
 
-  if (pathname === "/") pathname = "/teacher.html"; // default
+  if (pathname === "/") pathname = "/teacher.html";
+
   if (pathname.includes("..")) {
     res.writeHead(400);
     res.end("Bad path");
@@ -170,9 +207,28 @@ const server = http.createServer((req, res) => {
   }
 
   const filePath = path.join(PUBLIC_DIR, pathname);
+
   if (!filePath.startsWith(PUBLIC_DIR)) {
     res.writeHead(403);
     res.end("Forbidden");
+    return;
+  }
+
+  if (pathname === "/api/rounds") {
+    const roundsDir = path.join(PUBLIC_DIR, "rounds");
+
+    fs.readdir(roundsDir, (err, files) => {
+      if (err) {
+        res.writeHead(500);
+        return res.end(JSON.stringify({ error: "No se pudo leer /rounds" }));
+      }
+
+      const jsonFiles = files.filter(f => f.endsWith(".json"));
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ files: jsonFiles }));
+    });
+
     return;
   }
 
@@ -202,20 +258,31 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server });
 
 wss.on("connection", (ws) => {
-console.log("WS CONNECTED ✅", new Date().toISOString());
+  console.log("WS CONNECTED ✅", new Date().toISOString());
+
   state.clients.set(ws, { role: "guest" });
 
-  // send initial round state
-  send(ws, { type: "hello", serverTime: nowMs(), round: getPublicRound(state.round) });
+  // estado inicial
+  send(ws, {
+    type: "hello",
+    serverTime: nowMs(),
+    round: getPublicRound(state.round),
+  });
+
+  send(ws, {
+    type: "actions_panel_state",
+    panel: getPublicActionsPanel(),
+  });
 
   ws.on("message", (buf) => {
+    console.log("WS RAW >>>", buf.toString("utf8"));
 
     const msg = safeJsonParse(buf.toString("utf8"));
     if (!msg?.type) return;
 
     const meta = state.clients.get(ws) || { role: "guest" };
 
-console.log("WS MSG:", meta?.role, msg.type);
+    console.log("WS MSG:", meta.role, msg.type);
 
     // --- AUTH ---
     if (msg.type === "auth_teacher") {
@@ -224,13 +291,21 @@ console.log("WS MSG:", meta?.role, msg.type);
         send(ws, { type: "auth_error", message: "Teacher key inválida." });
         return;
       }
+
       state.clients.set(ws, { role: "teacher" });
+
       send(ws, {
         type: "auth_ok",
         role: "teacher",
         classPin: state.classPin,
         round: getPublicRound(state.round),
       });
+
+      send(ws, {
+        type: "actions_panel_state",
+        panel: getPublicActionsPanel(),
+      });
+
       broadcastLeaderboard();
       return;
     }
@@ -243,28 +318,37 @@ console.log("WS MSG:", meta?.role, msg.type);
         send(ws, { type: "auth_error", message: "Falta studentId." });
         return;
       }
+
       if (classPin !== state.classPin) {
         send(ws, { type: "auth_error", message: "PIN incorrecto." });
         return;
       }
 
       state.clients.set(ws, { role: "student", studentId });
+
       send(ws, {
         type: "auth_ok",
         role: "student",
         studentId,
         round: getPublicRound(state.round),
       });
+
+      send(ws, {
+        type: "actions_panel_state",
+        panel: getPublicActionsPanel(),
+      });
+
       return;
     }
 
-    // --- TEACHER ACTIONS ---
+    // --- TEACHER ACTIONS: RACE PANEL ---
     if (meta.role === "teacher" && msg.type === "teacher_set_pin") {
       const newPin = normalizeText(msg.classPin);
       if (!newPin || newPin.length < 2) {
         send(ws, { type: "error", message: "PIN inválido." });
         return;
       }
+
       state.classPin = newPin;
       send(ws, { type: "pin_ok", classPin: state.classPin });
       return;
@@ -272,18 +356,20 @@ console.log("WS MSG:", meta?.role, msg.type);
 
     if (meta.role === "teacher" && msg.type === "teacher_set_round") {
       const round = msg.round;
+
       if (!round?.prompts || !Array.isArray(round.prompts) || round.prompts.length < 1) {
         send(ws, { type: "error", message: "Ronda inválida: faltan incisos." });
         return;
       }
 
-      // sanitize prompts
       const prompts = round.prompts.map((p) => {
         const label = normalizeText(p.label);
         const type = p.type === "dropdown" ? "dropdown" : "text";
         const options =
           type === "dropdown"
-            ? (Array.isArray(p.options) ? p.options.map((x) => normalizeText(x)).filter(Boolean) : [])
+            ? (Array.isArray(p.options)
+                ? p.options.map((x) => normalizeText(x)).filter(Boolean)
+                : [])
             : null;
 
         return {
@@ -296,13 +382,17 @@ console.log("WS MSG:", meta?.role, msg.type);
       });
 
       const winnersPolicy = (() => {
-  const mode = round.winnersPolicy?.mode === "allPerfect" ? "allPerfect" : "topNPerfect";
-  const N = Number(round.winnersPolicy?.N ?? 3);
-  const autoClose = !!round.winnersPolicy?.autoClose;
-  return mode === "allPerfect"
-    ? { mode }
-    : { mode, N: Math.max(1, N), autoClose };
-})();
+        const mode =
+          round.winnersPolicy?.mode === "allPerfect"
+            ? "allPerfect"
+            : "topNPerfect";
+        const N = Number(round.winnersPolicy?.N ?? 3);
+        const autoClose = !!round.winnersPolicy?.autoClose;
+
+        return mode === "allPerfect"
+          ? { mode }
+          : { mode, N: Math.max(1, N), autoClose };
+      })();
 
       state.round = {
         roundId: String(round.roundId || `R-${nowMs()}`),
@@ -314,7 +404,6 @@ console.log("WS MSG:", meta?.role, msg.type);
         closedAt: null,
       };
 
-      // in v0.0.0 reset submissions when changing round
       state.submissions.clear();
 
       send(ws, { type: "round_saved", round: getPublicRound(state.round) });
@@ -328,6 +417,7 @@ console.log("WS MSG:", meta?.role, msg.type);
         send(ws, { type: "error", message: "No hay ronda configurada." });
         return;
       }
+
       state.submissions.clear();
       state.round.status = "open";
       state.round.openedAt = nowMs();
@@ -344,6 +434,7 @@ console.log("WS MSG:", meta?.role, msg.type);
         send(ws, { type: "error", message: "No hay ronda." });
         return;
       }
+
       state.round.status = "closed";
       state.round.closedAt = nowMs();
 
@@ -360,7 +451,6 @@ console.log("WS MSG:", meta?.role, msg.type);
         return;
       }
 
-      // grade all current submissions
       for (const [studentId, sub] of state.submissions.entries()) {
         const { scoreTotal, isPerfect } = computeScoreAndPerfect(round, sub);
         sub.scoreTotal = scoreTotal;
@@ -380,18 +470,18 @@ console.log("WS MSG:", meta?.role, msg.type);
         isWinner: winners.includes(s.studentId),
       }));
 
-	state.roundsHistory.push({
-  	  roundId: round.roundId,
-  	  prompts: round.prompts,
-  	  winnersPolicy: round.winnersPolicy,
-  	results: rows.map(r => ({
-    	  studentId: r.studentId,
-    	  scoreTotal: r.scoreTotal,
-    	  isPerfect: r.isPerfect,
-    	  isWinner: r.isWinner,
-  	})),
-      gradedAt: nowMs(),
-     });
+      state.roundsHistory.push({
+        roundId: round.roundId,
+        prompts: round.prompts,
+        winnersPolicy: round.winnersPolicy,
+        results: rows.map((r) => ({
+          studentId: r.studentId,
+          scoreTotal: r.scoreTotal,
+          isPerfect: r.isPerfect,
+          isWinner: r.isWinner,
+        })),
+        gradedAt: nowMs(),
+      });
 
       send(ws, { type: "graded_results", winners, rows });
       broadcastRoundState();
@@ -399,36 +489,33 @@ console.log("WS MSG:", meta?.role, msg.type);
       return;
     }
 
-//Teacher export JSON
     if (meta.role === "teacher" && msg.type === "teacher_export_json") {
-  const payload = {
-    sessionId: msg.sessionId || "SESSION-LOCAL",
-    exportedAt: nowMs(),
-    rounds: state.roundsHistory,
-  };
-  send(ws, { type: "export_json", payload });
-  return;
-}
+      const payload = {
+        sessionId: msg.sessionId || "SESSION-LOCAL",
+        exportedAt: nowMs(),
+        rounds: state.roundsHistory,
+      };
 
-if (meta.role === "teacher" && msg.type === "teacher_export_extras") {
-  const min = Number(msg.minPoints ?? 1);
-
-  const extras = computeAccumulatedExtras(
-    state.roundsHistory,
-    min
-  );
-
-  send(ws, {
-    type: "export_extras",
-    payload: {
-      sessionId: msg.sessionId || "SESSION",
-      exportedAt: nowMs(),
-      minPoints: min,
-      extras
+      send(ws, { type: "export_json", payload });
+      return;
     }
-  });
-  return;
-}
+
+    if (meta.role === "teacher" && msg.type === "teacher_export_extras") {
+      const min = Number(msg.minPoints ?? 1);
+
+      const extras = computeAccumulatedExtras(state.roundsHistory, min);
+
+      send(ws, {
+        type: "export_extras",
+        payload: {
+          sessionId: msg.sessionId || "SESSION",
+          exportedAt: nowMs(),
+          minPoints: min,
+          extras,
+        },
+      });
+      return;
+    }
 
     if (meta.role === "teacher" && msg.type === "teacher_reset_submissions") {
       state.submissions.clear();
@@ -437,17 +524,22 @@ if (meta.role === "teacher" && msg.type === "teacher_export_extras") {
       return;
     }
 
-    // --- STUDENT SUBMIT ---
+    // --- STUDENT SUBMIT: RACE PANEL ---
     if (meta.role === "student" && msg.type === "student_submit") {
       const round = state.round;
+
       if (!round || round.status !== "open") {
         send(ws, { type: "submit_error", message: "No hay ronda abierta." });
         return;
       }
 
       const studentId = meta.studentId;
+
       if (state.submissions.has(studentId)) {
-        send(ws, { type: "submit_error", message: "Ya enviaste tu respuesta en esta ronda." });
+        send(ws, {
+          type: "submit_error",
+          message: "Ya enviaste tu respuesta en esta ronda.",
+        });
         return;
       }
 
@@ -465,42 +557,215 @@ if (meta.role === "teacher" && msg.type === "teacher_export_extras") {
         scoreTotal: null,
       };
 
-      // (Optional) compute immediately so leaderboard can show perfects live
       const { scoreTotal, isPerfect } = computeScoreAndPerfect(round, sub);
       sub.scoreTotal = scoreTotal;
       sub.isPerfect = isPerfect;
 
       state.submissions.set(studentId, sub);
 
-      send(ws, { type: "submission_received", serverTime: sub.serverTime });
+      send(ws, {
+        type: "submission_received",
+        serverTime: sub.serverTime,
+      });
 
-      // update teacher leaderboard
       broadcastLeaderboard();
 
-	// AUTO-CLOSE AL LLEGAR A N PERFECTOS (opcional)
-	if (
- 	  round.winnersPolicy?.mode === "topNPerfect" &&
-  	  round.winnersPolicy?.autoClose === true &&
-  	  round.status === "open"
-	) {
- 	 const perfectCount = [...state.submissions.values()]
-  	  .filter(s => s.isPerfect === true)
-  	  .length;
+      // auto-close opcional al llegar a N perfectos
+      if (
+        round.winnersPolicy?.mode === "topNPerfect" &&
+        round.winnersPolicy?.autoClose === true &&
+        round.status === "open"
+      ) {
+        const perfectCount = [...state.submissions.values()].filter(
+          (s) => s.isPerfect === true
+        ).length;
 
-  	if (perfectCount >= round.winnersPolicy.N) {
-  	    round.status = "closed";
-   	   round.closedAt = nowMs();
-   	   broadcastRoundState();
-    	  broadcastLeaderboard();
-	  }
-	}
-
+        if (perfectCount >= round.winnersPolicy.N) {
+          round.status = "closed";
+          round.closedAt = nowMs();
+          broadcastRoundState();
+          broadcastLeaderboard();
+        }
+      }
 
       return;
     }
 
+    // --- TEACHER ACTIONS: ACTIONS PANEL ---
+    if (meta.role === "teacher" && msg.type === "teacher_set_actions_panel") {
+      const panel = msg.panel;
+
+      if (!panel?.buttons || !Array.isArray(panel.buttons) || panel.buttons.length < 1) {
+        send(ws, { type: "error", message: "Panel de acciones inválido." });
+        return;
+      }
+
+      const buttons = panel.buttons.map((b, idx) => ({
+        id: normalizeText(b.id || `btn_${idx + 1}`),
+        label: normalizeText(b.label || `Botón ${idx + 1}`),
+        key: normalizeText(b.key || ""),                    // ← importante
+        color: normalizeText(b.color || "#2563eb"),
+        priority: Number(b.priority ?? 0),
+      }));
+
+      state.actionsPanel.config = {
+        panelId: normalizeText(panel.panelId || `AP-${nowMs()}`),
+        language: normalizeText(panel.language || "de"),
+	correctionLevel: Number(panel.correctionLevel ?? 70),
+        buttons,
+      };
+      state.actionsPanel.status = "draft";
+      state.actionsPanel.clicks = [];
+
+      send(ws, {
+        type: "actions_panel_saved",
+        panel: getPublicActionsPanel(),
+      });
+
+      broadcastActionsPanelState();
+      return;
+    }
+
+    if (meta.role === "teacher" && msg.type === "teacher_open_actions_panel") {
+      if (!state.actionsPanel.config) {
+        send(ws, {
+          type: "error",
+          message: "No hay panel de acciones configurado.",
+        });
+        return;
+      }
+
+      state.actionsPanel.status = "open";
+      state.actionsPanel.clicks = [];
+
+      send(ws, {
+        type: "actions_panel_opened",
+        panel: getPublicActionsPanel(),
+      });
+
+      broadcastActionsPanelState();
+      return;
+    }
+
+    if (meta.role === "teacher" && msg.type === "teacher_close_actions_panel") {
+      if (!state.actionsPanel.config) {
+        send(ws, { type: "error", message: "No hay panel de acciones." });
+        return;
+      }
+
+      state.actionsPanel.status = "closed";
+
+      send(ws, {
+        type: "actions_panel_closed",
+        panel: getPublicActionsPanel(),
+      });
+
+      broadcastActionsPanelState();
+      return;
+    }
+
+    if (meta.role === "teacher" && msg.type === "teacher_export_actions_json") {
+      const panel = state.actionsPanel;
+
+      const summary = {};
+      for (const click of panel.clicks) {
+        summary[click.buttonId] = (summary[click.buttonId] || 0) + 1;
+      }
+
+      const payload = {
+        sessionId: msg.sessionId || state.classPin || "SESSION",
+        exportedAt: nowMs(),
+        panelId: panel.config?.panelId || null,
+        language: panel.config?.language || "de",
+  	correctionLevel: Number(panel.config?.correctionLevel ?? 70),
+        status: panel.status,
+        buttons: panel.config?.buttons || [],
+        clicks: panel.clicks,
+        summary,
+      };
+
+      send(ws, {
+        type: "export_actions_json",
+        payload,
+      });
+      return;
+    }
+
+    // --- STUDENT ACTIONS: ACTIONS PANEL ---
+    if (meta.role === "student" && msg.type === "student_click_action") {
+      const panel = state.actionsPanel;
+
+      if (!panel.config || panel.status !== "open") {
+        send(ws, {
+          type: "action_click_error",
+          message: "No hay panel abierto.",
+        });
+        return;
+      }
+
+      const studentId = meta.studentId;
+      const buttonId = normalizeText(msg.buttonId);
+
+      const alreadyClicked = panel.clicks.some((c) => c.studentId === studentId);
+      if (alreadyClicked) {
+        send(ws, {
+          type: "action_click_error",
+          message: "Ya hiciste una selección en esta ronda.",
+        });
+        return;
+      }
+
+      const exists = panel.config.buttons.some((b) => b.id === buttonId);
+      if (!exists) {
+        send(ws, {
+          type: "action_click_error",
+          message: "Botón inválido.",
+        });
+        return;
+      }
+
+      const click = {
+        studentId,
+        buttonId,
+        time: nowMs(),
+      };
+
+      panel.clicks.push(click);
+
+      send(ws, { type: "action_click_ok", click });
+      broadcastActionsPanelState();
+      return;
+    }
+
+// --- STUDENT CORRECTION LEVEL ---
+if (meta.role === "student" && msg.type === "student_set_correction_level") {
+  const rawLevel = msg.correctionLevel;
+  const level = Math.max(0, Math.min(100, Number(rawLevel) ?? 70));   // ← cambiado
+
+  const studentId = meta.studentId;
+
+  if (!state.studentCorrectionLevels) state.studentCorrectionLevels = {};
+  state.studentCorrectionLevels[studentId] = level;
+
+  console.log(`[Servidor] Guardado: ${studentId} = ${level}%  (recibido raw: ${rawLevel})`);
+
+  broadcastToRole("teacher", {
+    type: "student_correction_update",
+    studentId,
+    correctionLevel: level
+  });
+
+  broadcastActionsPanelState();
+
+  send(ws, { type: "correction_level_ok" });
+  return;
+}
+
     // fallback
-    send(ws, { type: "error", message: "Acción no permitida o no autenticada." });
+    send(ws, {
+      type: "error",
+      message: "Acción no permitida o no autenticada.",
+    });
   });
 
   ws.on("close", () => {

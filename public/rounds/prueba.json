@@ -1,0 +1,46 @@
+{
+  "roundId": null,
+  "prompts": [
+    {
+      "label": "1",
+      "type": "dropdown",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": "",
+      "points": 1
+    },
+    {
+      "label": "2",
+      "type": "dropdown",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": "",
+      "points": 1
+    },
+    {
+      "label": "3",
+      "type": "dropdown",
+      "options": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "correct": "",
+      "points": 1
+    }
+  ],
+  "winnersPolicy": {
+    "mode": "topNPerfect",
+    "N": 3,
+    "autoClose": false
+  }
+}

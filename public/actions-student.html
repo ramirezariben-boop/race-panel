@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Actions Panel — Student</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="wrap">
+
+    <!-- HEADER -->
+    <div class="header">
+      <div>
+        <h1>Actions Panel <span class="badge">student</span></h1>
+        <div class="sub">
+          Selecciona la acción que necesitas y ajusta cómo quieres ser corregido.
+        </div>
+      </div>
+      <div class="sub" id="wsInfo">WS: —</div>
+    </div>
+
+    <!-- LOGIN -->
+    <div class="card" id="loginCard">
+      <div class="row">
+        <div>
+          <label>Student ID</label>
+          <input id="studentId" placeholder="82" />
+        </div>
+
+        <div>
+          <label>PIN</label>
+          <input id="classPin" placeholder="SAM-123" />
+        </div>
+
+        <div style="flex: 1 1 140px;">
+          <label>&nbsp;</label>
+          <button id="btnLogin" class="btn-accent">Entrar</button>
+        </div>
+      </div>
+
+      <div class="small" id="loginStatus">No autenticado.</div>
+    </div>
+
+    <!-- PANEL -->
+    <div class="card" id="panelCard" style="display:none;">
+
+      <!-- KPIs -->
+      <div class="kpi">
+        <div>Estado: <span class="badge" id="panelStatus">—</span></div>
+        <div>Panel ID: <span class="badge" id="panelId">—</span></div>
+      </div>
+
+      <hr />
+
+      <!-- 🧠 NIVEL DE CORRECCIÓN -->
+      <div class="card" style="background:#121212;">
+        <h3 style="margin-top:0;">Nivel de corrección</h3>
+
+        <div class="row">
+          <div style="flex:2;">
+            <input 
+              id="correctionLevelStudent" 
+              type="range" 
+              min="0" 
+              max="100" 
+              step="10" 
+              value="70" 
+            />
+          </div>
+
+          <div style="flex:0 0 80px;">
+            <span class="badge" id="correctionValueStudent">70%</span>
+          </div>
+        </div>
+
+        <div class="small" id="correctionHint">
+          Ajusta cuánto quieres ser corregido:
+          0% = sin interrupciones · 100% = corrección total
+        </div>
+      </div>
+
+      <hr />
+
+      <!-- BOTONES -->
+      <div id="buttonsArea" class="note">
+        Esperando panel abierto…
+      </div>
+
+      <div class="small" id="actionStatus"></div>
+
+    </div>
+
+  </div>
+
+  <script src="/actions-student.js"></script>
+
+  <!-- 🔧 MINI SCRIPT UI -->
+  <script>
+    // Solo definimos el hook que usará actions-student.js
+    window.setStudentCorrectionLevelFromTeacher = function (val) {
+      const slider = document.getElementById("correctionLevelStudent");
+      const valueLabel = document.getElementById("correctionValueStudent");
+      if (!slider || !valueLabel) return;
+      slider.value = val;
+      valueLabel.textContent = val + "%";
+    };
+  </script>
+</body>
+</html>
