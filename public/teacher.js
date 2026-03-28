@@ -7,6 +7,12 @@ const btnAuth = document.getElementById("btnAuth");
 const classPinEl = document.getElementById("classPin");
 const btnSetPin = document.getElementById("btnSetPin");
 
+const pointsModeEl = document.getElementById("pointsMode");
+const totalRoundPointsEl = document.getElementById("totalRoundPoints");
+
+const btnApplyOptions = document.getElementById("btnApplyOptions");
+const globalOptionsEl = document.getElementById("globalOptions");
+
 const numPromptsEl = document.getElementById("numPrompts");
 const winnerModeEl = document.getElementById("winnerMode");
 const winnerNEl = document.getElementById("winnerN");
@@ -188,6 +194,11 @@ function applyRoundState(round) {
   roundStatusEl.textContent = round?.status ?? "—";
 }
 
+function parseNumberFlexible(val) {
+  if (typeof val !== "string") return Number(val) || 0;
+  return Number(val.replace(",", ".")) || 0;
+}
+
 function buildPromptsUI(k) {
   const rows = [];
   for (let i = 0; i < k; i++) {
@@ -206,7 +217,7 @@ function buildPromptsUI(k) {
             </select>
           </div>
           <div style="flex:2 1 220px;">
-            <label>Opciones (si dropdown)</label>
+            <label>Opciones</label>
             <input class="p-options" value="A,B,C,D" placeholder="A,B,C,D" />
           </div>
           <div style="flex:1 1 150px;">
@@ -218,23 +229,42 @@ function buildPromptsUI(k) {
             <input class="p-points" type="number" step="0.1" value="1" />
           </div>
         </div>
-        <div class="small">Tip: si es “text”, las opciones se ignoran.</div>
       </div>
     `);
   }
   promptsArea.innerHTML = rows.join("");
+
+setTimeout(() => {
+  document.querySelectorAll(".p-type").forEach(sel => {
+    const card = sel.closest(".card");
+    const optionsInput = card.querySelector(".p-options");
+
+    function update() {
+      if (sel.value === "text") {
+        optionsInput.disabled = true;
+        optionsInput.style.opacity = 0.4;
+      } else {
+        optionsInput.disabled = false;
+        optionsInput.style.opacity = 1;
+      }
+    }
+
+    sel.addEventListener("change", update);
+    update();
+  });
+}, 0);
 }
 
 function collectRoundDraft() {
+  const pointsMode = pointsModeEl.value;
   const promptCards = promptsArea.querySelectorAll(".card");
-  const prompts = [];
+  let prompts = [];
 
   for (const card of promptCards) {
     const label = card.querySelector(".p-label")?.value?.trim() || "";
     const type = card.querySelector(".p-type")?.value === "text" ? "text" : "dropdown";
     const optionsRaw = card.querySelector(".p-options")?.value || "";
     const correct = card.querySelector(".p-correct")?.value || "";
-    const points = Number(card.querySelector(".p-points")?.value || 0);
 
     const options =
       type === "dropdown"
@@ -249,20 +279,45 @@ function collectRoundDraft() {
       type,
       options,
       correct,
-      points,
+      points: 0
     });
   }
 
+if (pointsMode === "auto") {
+  const total = parseNumberFlexible(totalRoundPointsEl.value);
+  const per = prompts.length ? total / prompts.length : 0;
+
+  prompts = prompts.map(p => ({
+    ...p,
+    points: Number(per.toFixed(2))
+  }));
+} else {
+  // manual
+  prompts = prompts.map((p, i) => {
+    const card = promptCards[i];
+    const pts = parseNumberFlexible(card.querySelector(".p-points")?.value);
+
+    return {
+      ...p,
+      points: pts
+    };
+  });
+}
+
   const autoCloseChk = document.getElementById("autoCloseChk");
 
-  const mode = winnerModeEl.value === "allPerfect" ? "allPerfect" : "topNPerfect";
+  const winnerMode = winnerModeEl.value === "allPerfect" ? "allPerfect" : "topNPerfect";
   const N = Math.max(1, Number(winnerNEl.value || 3));
 
   return {
     roundId: (roundIdEl.value || "").trim() || null,
     prompts,
+    scoring: {
+        mode: pointsMode,
+        total: Number(totalRoundPointsEl.value || 0)
+    },
     winnersPolicy:
-      mode === "allPerfect"
+      winnerMode === "allPerfect"
         ? { mode }
         : { mode, N, autoClose: !!autoCloseChk.checked },
   };
@@ -316,6 +371,22 @@ btnAuth.onclick = () => {
 btnSetPin.onclick = () => {
   if (!isAuthed) return setStatus("Primero autentícate.", "error");
   ws.send(JSON.stringify({ type: "teacher_set_pin", classPin: classPinEl.value }));
+};
+
+btnApplyOptions.onclick = () => {
+  const val = globalOptionsEl.value.trim();
+  if (!val) return;
+
+  document.querySelectorAll(".card").forEach(card => {
+    const type = card.querySelector(".p-type")?.value;
+    const input = card.querySelector(".p-options");
+
+    if (type === "dropdown" && input) {
+      input.value = val;
+    }
+  });
+
+  setStatus("Opciones aplicadas a todas las preguntas.", "ok");
 };
 
 btnBuild.onclick = () => {

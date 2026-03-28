@@ -11,7 +11,6 @@
     <div class="header">
       <div>
         <h1>Race Panel <span class="badge">v0.0.4</span> — Lehrer — Rondas precargadas/Panel Preferencias</h1>
-        <div class="sub">Modo oscuro fijo. WS + timestamp del servidor.</div>
       </div>
       <div class="sub" id="wsInfo">WS: —</div>
     </div>
@@ -33,44 +32,67 @@
     <div class="card">
       <div class="row">
         <div>
-          <label>PIN de clase (lo dices en voz alta)</label>
-          <input id="classPin" placeholder="SAM-2026-02-13" />
+          <label>PIN de clase</label>
+          <input id="classPin" placeholder="123" />
         </div>
         <div style="flex: 1 1 140px;">
           <label>&nbsp;</label>
           <button id="btnSetPin">Guardar PIN</button>
         </div>
       </div>
-      <div class="small">Los alumnos entran con <b>ID + PIN</b>. Sin passwords en 0.0.0.</div>
     </div>
 
-<div>
-  <label>
-    <input type="checkbox" id="autoCloseChk" />
-    Cerrar automáticamente al llegar a N perfectos
-  </label>
+<div class="checkbox-inline">
+  <label for="autoCloseChk">AutoClose</label>
+  <input type="checkbox" id="autoCloseChk" />
 </div>
 
     <div class="card">
       <div class="row">
-        <div style="flex: 1 1 160px;">
-          <label>Número de incisos</label>
+        <div>
+          <label>#Incisos</label>
           <input id="numPrompts" type="number" min="1" value="3" />
         </div>
-        <div style="flex: 1 1 200px;">
-          <label>Política de ganadores</label>
+
+        <div>
+          <label>Winners</label>
           <select id="winnerMode">
             <option value="topNPerfect" selected>Top N perfectos</option>
             <option value="allPerfect">Todos los perfectos</option>
           </select>
         </div>
-        <div style="flex: 1 1 120px;">
-          <label>N (si Top N)</label>
+
+        <div>
+          <label>(ifTopN)</label>
           <input id="winnerN" type="number" min="1" value="3" />
         </div>
-        <div style="flex: 1 1 160px;">
-          <label>Round ID (opcional)</label>
-          <input id="roundId" placeholder="R-001" />
+
+        <div>
+          <label>R.ID</label>
+          <input id="roundId" placeholder="001" />
+        </div>
+
+        <div>
+          <label>PtsMode</label>
+          <select id="pointsMode">
+            <option value="manual" selected>Manual</option>
+            <option value="auto">Auto</option>
+          </select>
+        </div>
+
+        <div>
+          <label>Pts</label>
+          <input id="totalRoundPoints" type="number" step="0.1" value="5" />
+        </div>
+
+        <div>
+          <label>Options</label>
+          <input id="globalOptions" placeholder="A,B,C,D" />
+        </div>
+
+        <div>
+	  <label>ToAll</label>
+          <button id="btnApplyOptions">Do</button>
         </div>
       </div>
 
