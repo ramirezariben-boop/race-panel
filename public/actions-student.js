@@ -13,8 +13,12 @@ const panelIdEl = document.getElementById("panelId");
 const buttonsArea = document.getElementById("buttonsArea");
 const actionStatus = document.getElementById("actionStatus");
 
+let shouldReconnect = true;
+
 let ws;
 let isAuthed = false;
+
+let hasClicked = false;
 
 // ── Traducciones ──────────────────────────────────────────────
 const ACTIVITY_LABELS = {
@@ -92,8 +96,15 @@ function setStatus(text, ok = false) {
 
 function connectWS() {
   ws = new WebSocket(wsUrl());
-  ws.onopen = () => { wsInfo.textContent = "WS: conectado"; };
-  ws.onclose = () => { wsInfo.textContent = "WS: desconectado"; };
+  ws.onopen = () => { 
+    wsInfo.textContent = "WS: conectado"; 
+    tryAutoLogin();
+  };
+  ws.onclose = () => {
+    if (!shouldReconnect) return;
+
+    setTimeout(connectWS, 1500);
+  };
   ws.onerror = () => { wsInfo.textContent = "WS: error"; };
 
   ws.onmessage = (ev) => {
@@ -116,9 +127,29 @@ function handleMsg(msg) {
     return;
   }
 
+  if (msg.type === "session_end" || msg.type === "session_expired") {
+    shouldReconnect = false;
+
+    alert("La sesión ha terminado.");
+
+    localStorage.removeItem("classPin");
+    localStorage.removeItem("studentId");
+
+    if (ws) ws.close();
+
+    // REACTIVAR SISTEMA
+    setTimeout(() => {
+      shouldReconnect = true;
+      connectWS(); // 👈 clave
+    }, 500);
+
+    return;
+  }
+
   if (msg.type === "actions_panel_state") {
+    hasClicked = false;
     renderPanel(msg.panel);
-    return;   // ← NO tocamos el slider aquí
+    return;
   }
 
   if (msg.type === "action_click_ok") {
@@ -156,7 +187,8 @@ function renderPanel(panel) {
 
   document.querySelectorAll(".action-btn").forEach(btn => {
     btn.onclick = () => {
-      if (!isAuthed) return;
+      if (!isAuthed || hasClicked) return;
+	 hasClicked = true;
       ws.send(JSON.stringify({
         type: "student_click_action",
         buttonId: btn.dataset.id
@@ -171,7 +203,26 @@ btnLogin.onclick = () => {
   if (!studentId || !classPin) {
     return setStatus("Faltan Student ID o PIN");
   }
+
+  localStorage.setItem("studentId", studentId);
+  localStorage.setItem("classPin", classPin);
+
   ws.send(JSON.stringify({ type: "auth_student", studentId, classPin }));
 };
+
+function tryAutoLogin() {
+  const studentId = localStorage.getItem("studentId");
+  const classPin = localStorage.getItem("classPin");
+
+  if (studentId && classPin && ws && ws.readyState === 1) {
+    console.log("[AUTOLOGIN] student", studentId);
+
+    ws.send(JSON.stringify({
+      type: "auth_student",
+      studentId,
+      classPin
+    }));
+  }
+}
 
 connectWS();

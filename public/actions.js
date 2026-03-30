@@ -23,9 +23,11 @@ const clickCountEl = document.getElementById("clickCount");
 const summaryArea = document.getElementById("summaryArea");
 const clicksArea = document.getElementById("clicksArea");
 
+let shouldReconnect = true;
+
 let ws;
 let isAuthed = false;
-let studentCorrectionLevels = {};   // ← aquí guardamos los niveles de los alumnos
+let studentCorrectionLevels = {};
 
 // ==================== TRADUCCIONES ====================
 const ACTIVITY_LABELS = {
@@ -64,8 +66,16 @@ function setStatus(text, ok = false) {
 function connectWS() {
   ws = new WebSocket(wsUrl());
 
-  ws.onopen = () => { wsInfo.textContent = "WS: conectado"; };
-  ws.onclose = () => { wsInfo.textContent = "WS: desconectado"; };
+  ws.onopen = () => { 
+    wsInfo.textContent = "WS: conectado";
+    restoreTeacherSession();
+    tryAutoAuthTeacher();
+  };
+  ws.onclose = () => {
+    if (!shouldReconnect) return;
+
+    setTimeout(connectWS, 1500);
+  };
   ws.onerror = () => { wsInfo.textContent = "WS: error"; };
 
   ws.onmessage = (ev) => {
@@ -74,7 +84,6 @@ function connectWS() {
   };
 }
 
-// ==================== HANDLE MESSAGES ====================
 // ==================== HANDLE MESSAGES ====================
 function handleMsg(msg) {
   if (msg.type === "auth_ok" && msg.role === "teacher") {
@@ -107,6 +116,23 @@ function handleMsg(msg) {
       studentCorrectionLevels = { ...msg.panel.studentCorrectionLevels };   // copia profunda
       renderStudentCorrectionLevels(studentCorrectionLevels);
     }
+    return;
+  }
+
+  if (msg.type === "session_end" || msg.type === "session_expired") {
+    shouldReconnect = false;
+
+    localStorage.removeItem("classPin");
+
+    setStatus("Sesión finalizada.");
+    resetTeacherPanelUI?.();
+    if (ws) ws.close();
+   
+    setTimeout(() => {
+      shouldReconnect = true;
+      connectWS(); // 👈 clave
+    }, 500);
+
     return;
   }
 
@@ -244,6 +270,26 @@ function collectButtons() {
   return buttons;
 }
 
+function resetTeacherPanelUI() {
+  // reset slider
+  correctionLevelEl.value = 70;
+  correctionValueEl.textContent = "70%";
+
+  // reset panel id
+  panelIdEl.value = "";
+
+  // reset botones
+  buildInitialActions();
+
+  // reset visual panel
+  panelStatusEl.textContent = "—";
+  clickCountEl.textContent = "0";
+  summaryArea.innerHTML = "";
+  clicksArea.innerHTML = "";
+
+  setStatus("Nueva sesión iniciada (PIN cambiado).", true);
+}
+
 // ==================== RENDER ====================
 function renderPanel(panel) {
   panelStatusEl.textContent = panel?.status || "—";
@@ -346,12 +392,20 @@ function renderStudentCorrectionLevels(levels) {
 // ==================== EVENTOS ====================
 btnAuth.onclick = () => {
   const key = (teacherKeyEl.value || "").trim() || "LOCAL_DEV";
+   localStorage.setItem("teacherKey", key);
   ws.send(JSON.stringify({ type: "auth_teacher", teacherKey: key }));
 };
 
 btnSetPin.onclick = () => {
   if (!isAuthed) return setStatus("Primero autentícate.");
-  ws.send(JSON.stringify({ type: "teacher_set_pin", classPin: classPinEl.value }));
+  const newPin = classPinEl.value.trim();
+  if (!newPin) return setStatus("PIN inválido");
+  localStorage.setItem("classPin", newPin);
+  ws.send(JSON.stringify({ 
+    type: "teacher_set_pin", 
+    classPin: newPin 
+  }));
+  resetTeacherPanelUI();
 };
 
 btnAddAction.onclick = () => addActionCard("", 0);
@@ -383,6 +437,43 @@ btnExportActions.onclick = () => {
 correctionLevelEl.oninput = () => {
   correctionValueEl.textContent = `${correctionLevelEl.value}%`;
 };
+
+const btnEndSession = document.getElementById("btnEndSession");
+
+btnEndSession.onclick = () => {
+  if (!isAuthed) return;
+
+  if (!confirm("¿Seguro que quieres finalizar la sesión?")) return;
+
+  ws.send(JSON.stringify({
+    type: "teacher_end_session"
+  }));
+};
+
+// =============== RESTAURAR AL CARGAR ============
+
+function restoreTeacherSession() {
+  const savedKey = localStorage.getItem("teacherKey");
+  const savedPin = localStorage.getItem("classPin");
+
+  if (savedKey) teacherKeyEl.value = savedKey;
+  if (savedPin) classPinEl.value = savedPin;
+}
+
+// Auto-Auth al conectar
+
+function tryAutoAuthTeacher() {
+  const key = localStorage.getItem("teacherKey");
+
+  if (key && ws && ws.readyState === 1) {
+    console.log("[AUTOLOGIN] teacher");
+
+    ws.send(JSON.stringify({
+      type: "auth_teacher",
+      teacherKey: key
+    }));
+  }
+}
 
 // ==================== INICIO ====================
 createStudentCorrectionUI();

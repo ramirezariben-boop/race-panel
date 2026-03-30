@@ -13,6 +13,15 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 // Teacher auth (simple)
 const TEACHER_KEY = process.env.TEACHER_KEY || "LOCAL_DEV";
 
+const SESSION_MAX_AGE = 5 * 60 * 60 * 1000;
+
+function isSessionAlive() {
+  if (!state.sessionAlive) return false;
+
+  const age = nowMs() - (state.sessionCreatedAt || 0);
+  return age < SESSION_MAX_AGE;
+}
+
 // --- In-memory state ---
 const state = {
   classPin: "PIN-DEMO",
@@ -20,6 +29,8 @@ const state = {
   submissions: new Map(),
   clients: new Map(),
   roundsHistory: [],
+  sessionAlive: true,
+  sessionCreatedAt: Date.now(),
   actionsPanel: {
     config: null,   // { panelId, language, buttons: [{id,label,color,priority}] }
     status: "closed", // "draft" | "open" | "closed"
@@ -311,6 +322,13 @@ wss.on("connection", (ws) => {
     }
 
     if (msg.type === "auth_student") {
+      if (!isSessionAlive()) {
+        send(ws, { 
+          type: "session_expired", 
+          message: "La sesión ha expirado." 
+        });
+        return;
+      }
       const studentId = normalizeText(msg.studentId);
       const classPin = normalizeText(msg.classPin);
 
@@ -341,18 +359,52 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    // --- TEACHER ACTIONS: RACE PANEL ---
-    if (meta.role === "teacher" && msg.type === "teacher_set_pin") {
+    // --- SET PIN (RESET SESIÓN) ---
+    if (msg.type === "teacher_set_pin") {
+
+      const meta = state.clients.get(ws);
+
+      if (!meta || meta.role !== "teacher") {
+        send(ws, { type: "error", message: "No autorizado." });
+        return;
+      }
+
       const newPin = normalizeText(msg.classPin);
-      if (!newPin || newPin.length < 2) {
+
+      if (!newPin) {
         send(ws, { type: "error", message: "PIN inválido." });
         return;
       }
 
       state.classPin = newPin;
-      send(ws, { type: "pin_ok", classPin: state.classPin });
+
+      state.sessionAlive = true;
+      state.sessionCreatedAt = nowMs();
+
+      state.submissions.clear();
+
+      // RESET TOTAL DEL PANEL DE ACCIONES
+      state.actionsPanel = {
+        status: "close",
+        config: null,
+        clicks: [],
+      };
+
+      send(ws, {
+        type: "pin_ok",
+        classPin: state.classPin
+      });
+
+      // 🔄 broadcast a todos (teacher + students)
+      broadcastAll({
+        type: "actions_panel_state",
+        panel: getPublicActionsPanel(),
+      });
+
       return;
     }
+
+    // --- TEACHER ACTIONS: RACE PANEL ---
 
     if (meta.role === "teacher" && msg.type === "teacher_set_round") {
       const round = msg.round;
@@ -655,6 +707,8 @@ wss.on("connection", (ws) => {
 
       state.actionsPanel.status = "closed";
 
+      state.actionsPanel.clicks = [];
+
       send(ws, {
         type: "actions_panel_closed",
         panel: getPublicActionsPanel(),
@@ -688,6 +742,28 @@ wss.on("connection", (ws) => {
         type: "export_actions_json",
         payload,
       });
+      return;
+    }
+
+    if (meta.role === "teacher" && msg.type === "teacher_end_session") {
+
+      state.sessionAlive = false;
+
+      // limpiar estado
+      state.actionsPanel = {
+        config: null,
+        status: "closed",
+        clicks: [],
+      };
+
+      state.round = null;
+      state.submissions.clear();
+
+      // avisar a todos
+      broadcastAll({
+       type: "session_end"
+      });
+
       return;
     }
 
