@@ -43,6 +43,10 @@ const fileJson = document.getElementById("fileJson");
 const roundsSelect = document.getElementById("roundsSelect");
 const btnLoadRoundFromLibrary = document.getElementById("btnLoadRoundFromLibrary");
 
+const btnZoomRace = document.getElementById("btnZoomRace");
+const btnZoomActions = document.getElementById("btnZoomActions");
+const zoomPanelStatus = document.getElementById("zoomPanelStatus");
+
 let ws;
 let isAuthed = false;
 let currentRound = null;
@@ -87,6 +91,7 @@ function connectWS() {
 function handleMsg(msg) {
   if (msg.type === "hello") {
     if (msg.round) applyRoundState(msg.round);
+    if (msg.zoomPanel) zoomPanelStatus.textContent = `Panel Zoom activo: ${msg.zoomPanel}`;
     return;
   }
 
@@ -95,6 +100,7 @@ function handleMsg(msg) {
     setStatus("Autenticado como teacher.", "ok");
     if (msg.classPin) classPinEl.value = msg.classPin;
     if (msg.round) applyRoundState(msg.round);
+    if (msg.zoomPanel) zoomPanelStatus.textContent = `Panel Zoom activo: ${msg.zoomPanel}`;
     return;
   }
 
@@ -105,6 +111,11 @@ function handleMsg(msg) {
 
   if (msg.type === "pin_ok") {
     setStatus(`PIN guardado: ${msg.classPin}`, "ok");
+    return;
+  }
+
+  if (msg.type === "zoom_panel_ok") {
+    zoomPanelStatus.textContent = `Panel Zoom activo: ${msg.panel}`;
     return;
   }
 
@@ -177,16 +188,13 @@ function handleMsg(msg) {
       [JSON.stringify(msg.payload, null, 2)],
       { type: "application/json" }
     );
-
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `extras-${msg.payload.sessionId}.json`;
     a.click();
-
     setStatus("Puntos extra exportados.", "ok");
     return;
   }
-
 }
 
 function applyRoundState(round) {
@@ -234,25 +242,25 @@ function buildPromptsUI(k) {
   }
   promptsArea.innerHTML = rows.join("");
 
-setTimeout(() => {
-  document.querySelectorAll(".p-type").forEach(sel => {
-    const card = sel.closest(".card");
-    const optionsInput = card.querySelector(".p-options");
+  setTimeout(() => {
+    document.querySelectorAll(".p-type").forEach(sel => {
+      const card = sel.closest(".card");
+      const optionsInput = card.querySelector(".p-options");
 
-    function update() {
-      if (sel.value === "text") {
-        optionsInput.disabled = true;
-        optionsInput.style.opacity = 0.4;
-      } else {
-        optionsInput.disabled = false;
-        optionsInput.style.opacity = 1;
+      function update() {
+        if (sel.value === "text") {
+          optionsInput.disabled = true;
+          optionsInput.style.opacity = 0.4;
+        } else {
+          optionsInput.disabled = false;
+          optionsInput.style.opacity = 1;
+        }
       }
-    }
 
-    sel.addEventListener("change", update);
-    update();
-  });
-}, 0);
+      sel.addEventListener("change", update);
+      update();
+    });
+  }, 0);
 }
 
 function collectRoundDraft() {
@@ -268,44 +276,25 @@ function collectRoundDraft() {
 
     const options =
       type === "dropdown"
-        ? optionsRaw
-            .split(",")
-            .map((x) => x.trim())
-            .filter(Boolean)
+        ? optionsRaw.split(",").map((x) => x.trim()).filter(Boolean)
         : null;
 
-    prompts.push({
-      label,
-      type,
-      options,
-      correct,
-      points: 0
+    prompts.push({ label, type, options, correct, points: 0 });
+  }
+
+  if (pointsMode === "auto") {
+    const total = parseNumberFlexible(totalRoundPointsEl.value);
+    const per = prompts.length ? total / prompts.length : 0;
+    prompts = prompts.map(p => ({ ...p, points: Number(per.toFixed(2)) }));
+  } else {
+    prompts = prompts.map((p, i) => {
+      const card = promptCards[i];
+      const pts = parseNumberFlexible(card.querySelector(".p-points")?.value);
+      return { ...p, points: pts };
     });
   }
 
-if (pointsMode === "auto") {
-  const total = parseNumberFlexible(totalRoundPointsEl.value);
-  const per = prompts.length ? total / prompts.length : 0;
-
-  prompts = prompts.map(p => ({
-    ...p,
-    points: Number(per.toFixed(2))
-  }));
-} else {
-  // manual
-  prompts = prompts.map((p, i) => {
-    const card = promptCards[i];
-    const pts = parseNumberFlexible(card.querySelector(".p-points")?.value);
-
-    return {
-      ...p,
-      points: pts
-    };
-  });
-}
-
   const autoCloseChk = document.getElementById("autoCloseChk");
-
   const winnerMode = winnerModeEl.value === "allPerfect" ? "allPerfect" : "topNPerfect";
   const N = Math.max(1, Number(winnerNEl.value || 3));
 
@@ -313,13 +302,13 @@ if (pointsMode === "auto") {
     roundId: (roundIdEl.value || "").trim() || null,
     prompts,
     scoring: {
-        mode: pointsMode,
-        total: Number(totalRoundPointsEl.value || 0)
+      mode: pointsMode,
+      total: Number(totalRoundPointsEl.value || 0)
     },
     winnersPolicy:
       winnerMode === "allPerfect"
-        ? { mode }
-        : { mode, N, autoClose: !!autoCloseChk.checked },
+        ? { mode: winnerMode }
+        : { mode: winnerMode, N, autoClose: !!autoCloseChk.checked },
   };
 }
 
@@ -332,30 +321,20 @@ function renderResults(rows) {
     <table>
       <thead>
         <tr>
-          <th>#</th>
-          <th>StudentID</th>
-          <th>Time</th>
-          <th>Perfect</th>
-          <th>Score</th>
-          <th>Winner</th>
+          <th>#</th><th>StudentID</th><th>Time</th><th>Perfect</th><th>Score</th><th>Winner</th>
         </tr>
       </thead>
       <tbody>
-        ${rows
-          .map((r, idx) => {
-            const trClass = r.isWinner ? "winner" : "";
-            return `
-              <tr class="${trClass}">
-                <td class="mono">${idx + 1}</td>
-                <td class="mono">${r.studentId}</td>
-                <td>${fmtTime(r.serverTime)}</td>
-                <td>${r.isPerfect ? "✅" : "—"}</td>
-                <td class="mono">${Number(r.scoreTotal ?? 0).toFixed(2)}</td>
-                <td>${r.isWinner ? "🏆" : ""}</td>
-              </tr>
-            `;
-          })
-          .join("")}
+        ${rows.map((r, idx) => `
+          <tr class="${r.isWinner ? "winner" : ""}">
+            <td class="mono">${idx + 1}</td>
+            <td class="mono">${r.studentId}</td>
+            <td>${fmtTime(r.serverTime)}</td>
+            <td>${r.isPerfect ? "✅" : "—"}</td>
+            <td class="mono">${Number(r.scoreTotal ?? 0).toFixed(2)}</td>
+            <td>${r.isWinner ? "🏆" : ""}</td>
+          </tr>
+        `).join("")}
       </tbody>
     </table>
   `;
@@ -373,6 +352,16 @@ btnSetPin.onclick = () => {
   ws.send(JSON.stringify({ type: "teacher_set_pin", classPin: classPinEl.value }));
 };
 
+btnZoomRace.onclick = () => {
+  if (!isAuthed) return setStatus("Primero autentícate.", "error");
+  ws.send(JSON.stringify({ type: "teacher_switch_zoom_panel", panel: "race" }));
+};
+
+btnZoomActions.onclick = () => {
+  if (!isAuthed) return setStatus("Primero autentícate.", "error");
+  ws.send(JSON.stringify({ type: "teacher_switch_zoom_panel", panel: "actions" }));
+};
+
 btnApplyOptions.onclick = () => {
   const val = globalOptionsEl.value.trim();
   if (!val) return;
@@ -380,10 +369,7 @@ btnApplyOptions.onclick = () => {
   document.querySelectorAll(".card").forEach(card => {
     const type = card.querySelector(".p-type")?.value;
     const input = card.querySelector(".p-options");
-
-    if (type === "dropdown" && input) {
-      input.value = val;
-    }
+    if (type === "dropdown" && input) input.value = val;
   });
 
   setStatus("Opciones aplicadas a todas las preguntas.", "ok");
@@ -445,89 +431,37 @@ btnCopyWinners.onclick = async () => {
   }
 };
 
-btnImportJson.onclick = () => {
-  fileJson.click();
-};
+btnImportJson.onclick = () => fileJson.click();
 
 fileJson.onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-
   const text = await file.text();
-
   let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    return setStatus("JSON inválido", "error");
-  }
-
-  if (!data.prompts) {
-    return setStatus("JSON no tiene prompts", "error");
-  }
-
-  // llenar UI
-  buildPromptsUI(data.prompts.length);
-
-  const cards = promptsArea.querySelectorAll(".card");
-
-  data.prompts.forEach((p, i) => {
-    const card = cards[i];
-    if (!card) return;
-
-    card.querySelector(".p-label").value = p.label || "";
-    card.querySelector(".p-type").value = p.type || "dropdown";
-    card.querySelector(".p-options").value = (p.options || []).join(",");
-    card.querySelector(".p-correct").value = p.correct || "";
-    card.querySelector(".p-points").value = p.points ?? 1;
-  });
-
-  // winners policy
-  if (data.winnersPolicy) {
-    winnerModeEl.value = data.winnersPolicy.mode || "topNPerfect";
-    winnerNEl.value = data.winnersPolicy.N || 3;
-
-    const autoCloseChk = document.getElementById("autoCloseChk");
-    if (autoCloseChk) {
-      autoCloseChk.checked = !!data.winnersPolicy.autoClose;
-    }
-  }
-
-  if (data.roundId) {
-    roundIdEl.value = data.roundId;
-  }
-
+  try { data = JSON.parse(text); } catch { return setStatus("JSON inválido", "error"); }
+  if (!data.prompts) return setStatus("JSON no tiene prompts", "error");
+  applyRoundToUI(data);
   setStatus("JSON cargado correctamente.", "ok");
 };
 
 btnExportRoundJson.onclick = () => {
   const draft = collectRoundDraft();
-
-  const blob = new Blob(
-    [JSON.stringify(draft, null, 2)],
-    { type: "application/json" }
-  );
-
+  const blob = new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = `round-${draft.roundId || "sin-id"}.json`;
   a.click();
-
   setStatus("JSON de ronda exportado.", "ok");
 };
 
 btnLoadRoundFromLibrary.onclick = async () => {
   const file = roundsSelect.value;
   if (!file) return setStatus("Selecciona un archivo", "error");
-
   try {
     const res = await fetch(`/rounds/${file}`);
     if (!res.ok) throw new Error("No encontrado");
-
     const data = await res.json();
-
     applyRoundToUI(data);
-
     setStatus(`Cargado: ${file}`, "ok");
   } catch (err) {
     console.error(err);
@@ -536,19 +470,14 @@ btnLoadRoundFromLibrary.onclick = async () => {
 };
 
 function applyRoundToUI(data) {
-  if (!data.prompts) {
-    setStatus("JSON inválido (sin prompts)", "error");
-    return;
-  }
+  if (!data.prompts) { setStatus("JSON inválido (sin prompts)", "error"); return; }
 
   buildPromptsUI(data.prompts.length);
-
   const cards = promptsArea.querySelectorAll(".card");
 
   data.prompts.forEach((p, i) => {
     const card = cards[i];
     if (!card) return;
-
     card.querySelector(".p-label").value = p.label || "";
     card.querySelector(".p-type").value = p.type || "dropdown";
     card.querySelector(".p-options").value = (p.options || []).join(",");
@@ -559,29 +488,21 @@ function applyRoundToUI(data) {
   if (data.winnersPolicy) {
     winnerModeEl.value = data.winnersPolicy.mode || "topNPerfect";
     winnerNEl.value = data.winnersPolicy.N || 3;
-
     const autoCloseChk = document.getElementById("autoCloseChk");
-    if (autoCloseChk) {
-      autoCloseChk.checked = !!data.winnersPolicy.autoClose;
-    }
+    if (autoCloseChk) autoCloseChk.checked = !!data.winnersPolicy.autoClose;
   }
 
-  if (data.roundId) {
-    roundIdEl.value = data.roundId;
-  }
+  if (data.roundId) roundIdEl.value = data.roundId;
 }
 
 async function loadRoundLibrary() {
   try {
     const res = await fetch("/api/rounds");
     const data = await res.json();
-
     const files = data.files || [];
-
     roundsSelect.innerHTML =
       `<option value="">— Selecciona —</option>` +
       files.map(f => `<option value="${f}">${f}</option>`).join("");
-
   } catch (err) {
     console.error(err);
     setStatus("No se pudo cargar biblioteca", "error");
@@ -589,7 +510,5 @@ async function loadRoundLibrary() {
 }
 
 loadRoundLibrary();
-
-// boot
 connectWS();
 buildPromptsUI(Number(numPromptsEl.value || 3));

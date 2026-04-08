@@ -23,6 +23,10 @@ const clickCountEl = document.getElementById("clickCount");
 const summaryArea = document.getElementById("summaryArea");
 const clicksArea = document.getElementById("clicksArea");
 
+const btnZoomActions = document.getElementById("btnZoomActions");
+const btnZoomRace = document.getElementById("btnZoomRace");
+const zoomPanelStatus = document.getElementById("zoomPanelStatus");
+
 let shouldReconnect = true;
 
 let ws;
@@ -73,7 +77,6 @@ function connectWS() {
   };
   ws.onclose = () => {
     if (!shouldReconnect) return;
-
     setTimeout(connectWS, 1500);
   };
   ws.onerror = () => { wsInfo.textContent = "WS: error"; };
@@ -90,6 +93,7 @@ function handleMsg(msg) {
     isAuthed = true;
     setStatus("Autenticado como teacher.", true);
     if (msg.classPin) classPinEl.value = msg.classPin;
+    if (msg.zoomPanel) zoomPanelStatus.textContent = `Panel Zoom activo: ${msg.zoomPanel}`;
     return;
   }
 
@@ -103,6 +107,11 @@ function handleMsg(msg) {
     return;
   }
 
+  if (msg.type === "zoom_panel_ok") {
+    zoomPanelStatus.textContent = `Panel Zoom activo: ${msg.panel}`;
+    return;
+  }
+
   if (msg.type === "actions_panel_saved" ||
       msg.type === "actions_panel_opened" ||
       msg.type === "actions_panel_closed" ||
@@ -110,10 +119,9 @@ function handleMsg(msg) {
     
     renderPanel(msg.panel);
     
-    // Actualizar niveles de alumnos de forma segura
     if (msg.panel?.studentCorrectionLevels) {
       console.log("[Profesor] Recibido studentCorrectionLevels:", msg.panel.studentCorrectionLevels);
-      studentCorrectionLevels = { ...msg.panel.studentCorrectionLevels };   // copia profunda
+      studentCorrectionLevels = { ...msg.panel.studentCorrectionLevels };
       renderStudentCorrectionLevels(studentCorrectionLevels);
     }
     return;
@@ -121,18 +129,14 @@ function handleMsg(msg) {
 
   if (msg.type === "session_end" || msg.type === "session_expired") {
     shouldReconnect = false;
-
     localStorage.removeItem("classPin");
-
     setStatus("Sesión finalizada.");
     resetTeacherPanelUI?.();
     if (ws) ws.close();
-   
     setTimeout(() => {
       shouldReconnect = true;
-      connectWS(); // 👈 clave
+      connectWS();
     }, 500);
-
     return;
   }
 
@@ -220,7 +224,6 @@ function addActionCard(defaultKey = "", index = 0) {
     </div>
   `;
 
-  // Hidden key para traducción
   const keyInput = document.createElement("input");
   keyInput.type = "hidden";
   keyInput.className = "b-key";
@@ -271,22 +274,14 @@ function collectButtons() {
 }
 
 function resetTeacherPanelUI() {
-  // reset slider
   correctionLevelEl.value = 70;
   correctionValueEl.textContent = "70%";
-
-  // reset panel id
   panelIdEl.value = "";
-
-  // reset botones
   buildInitialActions();
-
-  // reset visual panel
   panelStatusEl.textContent = "—";
   clickCountEl.textContent = "0";
   summaryArea.innerHTML = "";
   clicksArea.innerHTML = "";
-
   setStatus("Nueva sesión iniciada (PIN cambiado).", true);
 }
 
@@ -352,14 +347,11 @@ function createStudentCorrectionUI() {
     <h3 style="margin-top:0;">Nivel de corrección de los alumnos</h3>
     <div id="studentsCorrectionList" class="small">Ningún alumno ha ajustado su nivel aún.</div>
   `;
-  // Insertar después del card principal de configuración
-  const mainConfigCard = document.querySelectorAll('.card')[2];
+  const mainConfigCard = document.querySelectorAll('.card')[3];
   if (mainConfigCard) mainConfigCard.after(area);
 }
 
 function renderStudentCorrectionLevels(levels) {
-  console.log(`[Profesor] renderStudentCorrectionLevels llamado con:`, levels);   // ← importante
-
   const container = document.getElementById("studentsCorrectionList");
   if (!container) return;
 
@@ -392,7 +384,7 @@ function renderStudentCorrectionLevels(levels) {
 // ==================== EVENTOS ====================
 btnAuth.onclick = () => {
   const key = (teacherKeyEl.value || "").trim() || "LOCAL_DEV";
-   localStorage.setItem("teacherKey", key);
+  localStorage.setItem("teacherKey", key);
   ws.send(JSON.stringify({ type: "auth_teacher", teacherKey: key }));
 };
 
@@ -401,11 +393,18 @@ btnSetPin.onclick = () => {
   const newPin = classPinEl.value.trim();
   if (!newPin) return setStatus("PIN inválido");
   localStorage.setItem("classPin", newPin);
-  ws.send(JSON.stringify({ 
-    type: "teacher_set_pin", 
-    classPin: newPin 
-  }));
+  ws.send(JSON.stringify({ type: "teacher_set_pin", classPin: newPin }));
   resetTeacherPanelUI();
+};
+
+btnZoomActions.onclick = () => {
+  if (!isAuthed) return setStatus("Primero autentícate.");
+  ws.send(JSON.stringify({ type: "teacher_switch_zoom_panel", panel: "actions" }));
+};
+
+btnZoomRace.onclick = () => {
+  if (!isAuthed) return setStatus("Primero autentícate.");
+  ws.send(JSON.stringify({ type: "teacher_switch_zoom_panel", panel: "race" }));
 };
 
 btnAddAction.onclick = () => addActionCard("", 0);
@@ -442,36 +441,22 @@ const btnEndSession = document.getElementById("btnEndSession");
 
 btnEndSession.onclick = () => {
   if (!isAuthed) return;
-
   if (!confirm("¿Seguro que quieres finalizar la sesión?")) return;
-
-  ws.send(JSON.stringify({
-    type: "teacher_end_session"
-  }));
+  ws.send(JSON.stringify({ type: "teacher_end_session" }));
 };
 
 // =============== RESTAURAR AL CARGAR ============
-
 function restoreTeacherSession() {
   const savedKey = localStorage.getItem("teacherKey");
   const savedPin = localStorage.getItem("classPin");
-
   if (savedKey) teacherKeyEl.value = savedKey;
   if (savedPin) classPinEl.value = savedPin;
 }
 
-// Auto-Auth al conectar
-
 function tryAutoAuthTeacher() {
   const key = localStorage.getItem("teacherKey");
-
   if (key && ws && ws.readyState === 1) {
-    console.log("[AUTOLOGIN] teacher");
-
-    ws.send(JSON.stringify({
-      type: "auth_teacher",
-      teacherKey: key
-    }));
+    ws.send(JSON.stringify({ type: "auth_teacher", teacherKey: key }));
   }
 }
 
@@ -481,5 +466,4 @@ connectWS();
 buildInitialActions();
 correctionValueEl.textContent = `${correctionLevelEl.value}%`;
 
-// Actualizar acciones al cambiar idioma
 document.getElementById("classLanguage")?.addEventListener("change", buildInitialActions);

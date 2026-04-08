@@ -42,10 +42,19 @@
       </div>
     </div>
 
-<div class="checkbox-inline">
-  <label for="autoCloseChk">AutoClose</label>
-  <input type="checkbox" id="autoCloseChk" />
-</div>
+    <div class="card">
+      <h3 style="margin-top:0; font-size:14px;">📱 Zoom — Vista de alumnos</h3>
+      <div class="btnbar">
+        <button id="btnZoomRace">🏁 Mostrar Quiz</button>
+        <button id="btnZoomActions">🎯 Mostrar Acciones</button>
+      </div>
+      <div class="small" id="zoomPanelStatus">Panel Zoom activo: —</div>
+    </div>
+
+    <div class="checkbox-inline">
+      <label for="autoCloseChk">AutoClose</label>
+      <input type="checkbox" id="autoCloseChk" />
+    </div>
 
     <div class="card">
       <div class="row">
@@ -91,7 +100,7 @@
         </div>
 
         <div>
-	  <label>ToAll</label>
+          <label>ToAll</label>
           <button id="btnApplyOptions">Do</button>
         </div>
       </div>
@@ -105,7 +114,6 @@
         <button id="btnReset" class="btn-danger">Reset envíos</button>
         <button id="btnExport">JSON</button>
         <button id="btnExportExtras">Pts. JSON</button>
-
       </div>
 
       <hr />
@@ -126,8 +134,8 @@
 
       <div class="btnbar">
         <button id="btnImportJson">Cargar</button>
-	<button id="btnExportRoundJson">Guardar</button>
-	<input type="file" id="fileJson" accept=".json" style="display:none" />
+        <button id="btnExportRoundJson">Guardar</button>
+        <input type="file" id="fileJson" accept=".json" style="display:none" />
       </div>
 
       <div id="resultsArea"></div>
