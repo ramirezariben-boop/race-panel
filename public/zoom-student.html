@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Zoom Student</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    /* Overrides para el contexto Zoom — ventana más estrecha */
+    .wrap { max-width: 100%; padding: 12px 10px 40px; }
+    h1 { font-size: 16px; }
+
+    #zoomStatus {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    /* Botones de acción grandes — optimizados para touch */
+    .action-btn {
+      display: block;
+      width: 100%;
+      padding: 18px 12px;
+      margin: 8px 0;
+      font-size: 17px;
+      font-weight: 700;
+      border: none;
+      border-radius: 14px;
+      cursor: pointer;
+      color: #fff;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .action-btn:active { opacity: 0.75; transform: scale(0.97); }
+    .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Slider de corrección */
+    #correctionSection {
+      margin-top: 14px;
+    }
+
+    /* Race panel inputs */
+    #racePanel .row { flex-wrap: wrap; }
+
+    /* Panel switch indicator */
+    .panel-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <div id="zoomStatus">Conectando…</div>
+
+    <!-- LOADING -->
+    <div id="loadingView" class="card">
+      <div class="note">Identificando usuario…</div>
+    </div>
+
+    <!-- ACTIONS PANEL VIEW -->
+    <div id="actionsView" style="display:none;">
+      <div class="panel-label">Panel de acciones</div>
+
+      <div class="card">
+        <div class="kpi">
+          <div>Estado: <span class="badge" id="ap-status">—</span></div>
+          <div>Panel: <span class="badge" id="ap-id">—</span></div>
+        </div>
+      </div>
+
+      <div id="ap-buttonsArea">
+        <div class="note">Esperando panel abierto…</div>
+      </div>
+
+      <div class="small" id="ap-actionStatus"></div>
+
+      <!-- Nivel de corrección -->
+      <div id="correctionSection" class="card" style="background:#121212;">
+        <h3 style="margin-top:0; font-size:14px;">Nivel de corrección</h3>
+        <div class="row">
+          <div style="flex:2;">
+            <input id="correctionSlider" type="range" min="0" max="100" step="10" value="70" />
+          </div>
+          <div style="flex:0 0 60px; text-align:right;">
+            <span class="badge" id="correctionValue">70%</span>
+          </div>
+        </div>
+        <div class="small">0% = sin interrupciones · 100% = corrección total</div>
+      </div>
+    </div>
+
+    <!-- RACE PANEL VIEW -->
+    <div id="raceView" style="display:none;">
+      <div class="panel-label">Quiz</div>
+
+      <div class="card">
+        <div class="kpi">
+          <div>Ronda: <span class="badge" id="rp-roundId">—</span></div>
+          <div>Estado: <span class="badge" id="rp-status">—</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div id="rp-inputsArea" class="note">Esperando ronda…</div>
+        <div class="btnbar" style="margin-top:12px;">
+          <button id="rp-btnSubmit" class="btn-ok" disabled>Enviar</button>
+        </div>
+        <div class="small" id="rp-submitStatus"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Zoom Apps SDK -->
+  <script src="https://appssdk.zoom.us/sdk.js"></script>
+
+  <script>
+    // ─── Estado local ────────────────────────────────────────────────
+    let ws;
+    let isAuthed = false;
+    let myId = null;
+    let currentZoomPanel = "actions"; // "race" | "actions"
+
+    // Actions panel
+    let hasClicked = false;
+    let currentCorrectionLevel = 70;
+
+    // Race panel
+    let round = null;
+    let hasSubmitted = false;
+
+    // ─── Traducciones ────────────────────────────────────────────────
+    const ACTIVITY_LABELS = {
+      listen:        { de: "Hören",       en: "Listening",      it: "Ascolto",   pt: "Ouvir" },
+      read:          { de: "Lesen",       en: "Reading",        it: "Lettura",   pt: "Ler" },
+      speak:         { de: "Sprechen",    en: "Speaking",       it: "Parlare",   pt: "Falar" },
+      write:         { de: "Schreiben",   en: "Writing",        it: "Scrittura", pt: "Escrever" },
+      grammar:       { de: "Grammatik",   en: "Grammar",        it: "Grammatica",pt: "Gramática" },
+      pronunciation: { de: "Aussprache",  en: "Pronunciation",  it: "Pronuncia", pt: "Pronúncia" },
+      vocabulary:    { de: "Wortschatz",  en: "Vocabulary",     it: "Vocabolario",pt: "Vocabulário" },
+      free_speaking: { de: "freies Sprechen", en: "Free Speaking", it: "Parlato libero", pt: "Fala livre" },
+      games:         { de: "Spiele",      en: "Games",          it: "Giochi",    pt: "Jogos" },
+      dictation:     { de: "Diktat",      en: "Dictation",      it: "Dettato",   pt: "Ditado" },
+    };
+
+    function resolveLabel(button, lang) {
+      if (button.key && ACTIVITY_LABELS[button.key]) {
+        return ACTIVITY_LABELS[button.key][lang] || button.label;
+      }
+      if (ACTIVITY_LABELS[button.id]) {
+        return ACTIVITY_LABELS[button.id][lang] || button.label;
+      }
+      return button.label || button.id || "Acción";
+    }
+
+    // ─── DOM refs ────────────────────────────────────────────────────
+    const zoomStatusEl   = document.getElementById("zoomStatus");
+    const loadingView    = document.getElementById("loadingView");
+    const actionsView    = document.getElementById("actionsView");
+    const raceView       = document.getElementById("raceView");
+
+    // Actions
+    const apStatus       = document.getElementById("ap-status");
+    const apId           = document.getElementById("ap-id");
+    const apButtonsArea  = document.getElementById("ap-buttonsArea");
+    const apActionStatus = document.getElementById("ap-actionStatus");
+    const correctionSlider = document.getElementById("correctionSlider");
+    const correctionValue  = document.getElementById("correctionValue");
+
+    // Race
+    const rpRoundId      = document.getElementById("rp-roundId");
+    const rpStatus       = document.getElementById("rp-status");
+    const rpInputsArea   = document.getElementById("rp-inputsArea");
+    const rpBtnSubmit    = document.getElementById("rp-btnSubmit");
+    const rpSubmitStatus = document.getElementById("rp-submitStatus");
+
+    // ─── Panel switch ────────────────────────────────────────────────
+    function showPanel(panel) {
+      currentZoomPanel = panel;
+      loadingView.style.display  = "none";
+      actionsView.style.display  = panel === "actions" ? "block" : "none";
+      raceView.style.display     = panel === "race"    ? "block" : "none";
+    }
+
+    // ─── Zoom SDK ────────────────────────────────────────────────────
+    async function initZoom() {
+      try {
+        await zoomSdk.config({
+          capabilities: ["getUserContext"],
+          popoutSize: { width: 380, height: 720 },
+        });
+
+        const ctx = await zoomSdk.getUserContext();
+        // screenName es el nombre del participante en la reunión
+        myId = ctx.screenName || ctx.participantId || "zoom-user";
+        zoomStatusEl.textContent = `Zoom: ${myId}`;
+        connectWS();
+      } catch (err) {
+        // Fuera del cliente Zoom (dev en navegador) — usar fallback
+        console.warn("[Zoom SDK] No disponible, modo dev:", err.message);
+        myId = `dev-${Math.floor(Math.random() * 900) + 100}`;
+        zoomStatusEl.textContent = `Dev: ${myId}`;
+        connectWS();
+      }
+    }
+
+    // ─── WebSocket ───────────────────────────────────────────────────
+    function wsUrl() {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      return `${proto}//${location.host}`;
+    }
+
+    function connectWS() {
+      ws = new WebSocket(wsUrl());
+
+      ws.onopen = () => {
+        // Auth inmediato sin PIN — el servidor acepta auth_student sin classPin
+        ws.send(JSON.stringify({ type: "auth_student", studentId: myId }));
+      };
+
+      ws.onclose = () => {
+        setTimeout(connectWS, 1500);
+      };
+
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);
+        handleMsg(msg);
+      };
+    }
+
+    // ─── Mensajes WS ─────────────────────────────────────────────────
+    function handleMsg(msg) {
+
+      if (msg.type === "hello") {
+        // El servidor incluye zoomPanel en hello
+        if (msg.zoomPanel) showPanel(msg.zoomPanel);
+        if (msg.round) applyRound(msg.round);
+        return;
+      }
+
+      if (msg.type === "auth_ok" && msg.role === "student") {
+        isAuthed = true;
+        if (msg.zoomPanel) showPanel(msg.zoomPanel);
+        else showPanel(currentZoomPanel);
+        if (msg.round) applyRound(msg.round);
+        return;
+      }
+
+      if (msg.type === "auth_error") {
+        zoomStatusEl.textContent = `Error: ${msg.message}`;
+        return;
+      }
+
+      if (msg.type === "switch_zoom_panel") {
+        showPanel(msg.panel);
+        return;
+      }
+
+      if (msg.type === "session_end" || msg.type === "session_expired") {
+        loadingView.style.display = "block";
+        actionsView.style.display = "none";
+        raceView.style.display    = "none";
+        loadingView.innerHTML = `<div class="note">Sesión finalizada.</div>`;
+        if (ws) ws.close();
+        return;
+      }
+
+      // ── Actions panel ──
+      if (msg.type === "actions_panel_state") {
+        hasClicked = false;
+        renderActionsPanel(msg.panel);
+        return;
+      }
+
+      if (msg.type === "action_click_ok") {
+        apActionStatus.textContent = "✓ Acción enviada";
+        return;
+      }
+
+      if (msg.type === "action_click_error") {
+        apActionStatus.textContent = msg.message || "Error";
+        return;
+      }
+
+      // ── Race panel ──
+      if (msg.type === "round_state") {
+        applyRound(msg.round);
+        return;
+      }
+
+      if (msg.type === "submission_received") {
+        hasSubmitted = true;
+        rpBtnSubmit.disabled = true;
+        rpSubmitStatus.textContent = `✅ Recibido`;
+        rpSubmitStatus.className = "small status-ok";
+        return;
+      }
+
+      if (msg.type === "submit_error") {
+        rpSubmitStatus.textContent = msg.message || "No se pudo enviar.";
+        rpSubmitStatus.className = "small status-error";
+        return;
+      }
+    }
+
+    // ─── Actions panel render ─────────────────────────────────────────
+    function renderActionsPanel(panel) {
+      apStatus.textContent = panel?.status || "—";
+      apId.textContent     = panel?.config?.panelId || "—";
+
+      const buttons = panel?.config?.buttons || [];
+      const lang    = panel?.config?.language || "de";
+
+      if (!buttons.length || panel.status !== "open") {
+        apButtonsArea.innerHTML = `<div class="note">Esperando panel abierto…</div>`;
+        return;
+      }
+
+      apButtonsArea.innerHTML = buttons.map(b => `
+        <button
+          class="action-btn"
+          style="background:${b.color};"
+          data-id="${b.id}"
+          ${hasClicked ? "disabled" : ""}
+        >
+          ${resolveLabel(b, lang)}
+        </button>
+      `).join("");
+
+      document.querySelectorAll(".action-btn").forEach(btn => {
+        btn.onclick = () => {
+          if (!isAuthed || hasClicked) return;
+          hasClicked = true;
+          document.querySelectorAll(".action-btn").forEach(b => b.disabled = true);
+          ws.send(JSON.stringify({
+            type: "student_click_action",
+            buttonId: btn.dataset.id,
+          }));
+        };
+      });
+    }
+
+    // ─── Race panel render ────────────────────────────────────────────
+    function applyRound(r) {
+      round = r;
+      hasSubmitted = false;
+      const status = round?.status ?? "—";
+
+      rpRoundId.textContent = round?.roundId ?? "—";
+      rpStatus.textContent  = status;
+
+      if (!round || status !== "open") {
+        rpInputsArea.innerHTML = `<div class="note">No hay ronda abierta.</div>`;
+        rpBtnSubmit.disabled = true;
+        return;
+      }
+
+      renderRaceInputs(round.prompts || []);
+      rpBtnSubmit.disabled = false;
+      rpSubmitStatus.textContent = "Ronda abierta. Solo 1 envío.";
+      rpSubmitStatus.className = "small";
+    }
+
+    function renderRaceInputs(prompts) {
+      if (!prompts.length) {
+        rpInputsArea.innerHTML = `<div class="note">Sin preguntas.</div>`;
+        return;
+      }
+
+      rpInputsArea.innerHTML = prompts.map(p => {
+        if (p.type === "dropdown" && Array.isArray(p.options) && p.options.length) {
+          return `
+            <div style="margin-bottom:10px;">
+              <label>${p.label}</label>
+              <select data-label="${p.label}">
+                ${p.options.map(o => `<option value="${o}">${o}</option>`).join("")}
+              </select>
+            </div>`;
+        }
+        return `
+          <div style="margin-bottom:10px;">
+            <label>${p.label}</label>
+            <input data-label="${p.label}" placeholder="Escribe exactamente…" />
+          </div>`;
+      }).join("");
+    }
+
+    function collectAnswers() {
+      return [...rpInputsArea.querySelectorAll("[data-label]")].map(el => ({
+        label: el.getAttribute("data-label"),
+        value: String(el.value ?? "").trim().replace(/\s+/g, " "),
+      }));
+    }
+
+    // ─── Slider corrección ───────────────────────────────────────────
+    correctionSlider.oninput = () => {
+      currentCorrectionLevel = Number(correctionSlider.value);
+      correctionValue.textContent = currentCorrectionLevel + "%";
+
+      if (isAuthed && ws?.readyState === 1) {
+        ws.send(JSON.stringify({
+          type: "student_set_correction_level",
+          correctionLevel: currentCorrectionLevel,
+        }));
+      }
+    };
+
+    // ─── Race submit ─────────────────────────────────────────────────
+    rpBtnSubmit.onclick = () => {
+      if (!round || round.status !== "open" || hasSubmitted) return;
+      ws.send(JSON.stringify({
+        type: "student_submit",
+        answers: collectAnswers(),
+      }));
+    };
+
+    // ─── Boot ────────────────────────────────────────────────────────
+    initZoom();
+  </script>
+</body>
+</html>

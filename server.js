@@ -31,6 +31,7 @@ const state = {
   roundsHistory: [],
   sessionAlive: true,
   sessionCreatedAt: Date.now(),
+  zoomPanel: "actions", // "race" | "actions" — qué ve zoom-student.html
   actionsPanel: {
     config: null,   // { panelId, language, buttons: [{id,label,color,priority}] }
     status: "closed", // "draft" | "open" | "closed"
@@ -142,7 +143,6 @@ function getPublicActionsPanel() {
     summary[click.buttonId] = (summary[click.buttonId] || 0) + 1;
   }
 
-  // FORZAMOS mantener los niveles de alumnos
   const studentCorrectionLevels = state.studentCorrectionLevels || {};
 
   console.log(`[Servidor] Enviando panel con niveles:`, studentCorrectionLevels);
@@ -278,6 +278,7 @@ wss.on("connection", (ws) => {
     type: "hello",
     serverTime: nowMs(),
     round: getPublicRound(state.round),
+    zoomPanel: state.zoomPanel, // ← incluido en hello
   });
 
   send(ws, {
@@ -310,6 +311,7 @@ wss.on("connection", (ws) => {
         role: "teacher",
         classPin: state.classPin,
         round: getPublicRound(state.round),
+        zoomPanel: state.zoomPanel,
       });
 
       send(ws, {
@@ -337,7 +339,8 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      if (classPin !== state.classPin) {
+      // Si viene con classPin, validarlo; si no (contexto Zoom), saltar validación
+      if (classPin && classPin !== state.classPin) {
         send(ws, { type: "auth_error", message: "PIN incorrecto." });
         return;
       }
@@ -349,6 +352,7 @@ wss.on("connection", (ws) => {
         role: "student",
         studentId,
         round: getPublicRound(state.round),
+        zoomPanel: state.zoomPanel,
       });
 
       send(ws, {
@@ -395,12 +399,25 @@ wss.on("connection", (ws) => {
         classPin: state.classPin
       });
 
-      // 🔄 broadcast a todos (teacher + students)
       broadcastAll({
         type: "actions_panel_state",
         panel: getPublicActionsPanel(),
       });
 
+      return;
+    }
+
+    // --- TEACHER: SWITCH ZOOM PANEL ---
+    if (meta.role === "teacher" && msg.type === "teacher_switch_zoom_panel") {
+      const panel = msg.panel === "race" ? "race" : "actions";
+      state.zoomPanel = panel;
+
+      broadcastAll({
+        type: "switch_zoom_panel",
+        panel,
+      });
+
+      send(ws, { type: "zoom_panel_ok", panel });
       return;
     }
 
@@ -576,6 +593,197 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    // --- TEACHER ACTIONS: ACTIONS PANEL ---
+    if (meta.role === "teacher" && msg.type === "teacher_set_actions_panel") {
+      const panel = msg.panel;
+
+      if (!panel?.buttons || !Array.isArray(panel.buttons) || panel.buttons.length < 1) {
+        send(ws, { type: "error", message: "Panel de acciones inválido." });
+        return;
+      }
+
+      const buttons = panel.buttons.map((b, idx) => ({
+        id: normalizeText(b.id || `btn_${idx + 1}`),
+        label: normalizeText(b.label || `Botón ${idx + 1}`),
+        key: normalizeText(b.key || ""),
+        color: normalizeText(b.color || "#2563eb"),
+        priority: Number(b.priority ?? 0),
+      }));
+
+      state.actionsPanel.config = {
+        panelId: normalizeText(panel.panelId || `AP-${nowMs()}`),
+        language: normalizeText(panel.language || "de"),
+        correctionLevel: Number(panel.correctionLevel ?? 70),
+        buttons,
+      };
+      state.actionsPanel.status = "draft";
+      state.actionsPanel.clicks = [];
+
+      send(ws, {
+        type: "actions_panel_saved",
+        panel: getPublicActionsPanel(),
+      });
+
+      broadcastActionsPanelState();
+      return;
+    }
+
+    if (meta.role === "teacher" && msg.type === "teacher_open_actions_panel") {
+      if (!state.actionsPanel.config) {
+        send(ws, {
+          type: "error",
+          message: "No hay panel de acciones configurado.",
+        });
+        return;
+      }
+
+      state.actionsPanel.status = "open";
+      state.actionsPanel.clicks = [];
+
+      send(ws, {
+        type: "actions_panel_opened",
+        panel: getPublicActionsPanel(),
+      });
+
+      broadcastActionsPanelState();
+      return;
+    }
+
+    if (meta.role === "teacher" && msg.type === "teacher_close_actions_panel") {
+      if (!state.actionsPanel.config) {
+        send(ws, { type: "error", message: "No hay panel de acciones." });
+        return;
+      }
+
+      state.actionsPanel.status = "closed";
+      state.actionsPanel.clicks = [];
+
+      send(ws, {
+        type: "actions_panel_closed",
+        panel: getPublicActionsPanel(),
+      });
+
+      broadcastActionsPanelState();
+      return;
+    }
+
+    if (meta.role === "teacher" && msg.type === "teacher_export_actions_json") {
+      const panel = state.actionsPanel;
+
+      const summary = {};
+      for (const click of panel.clicks) {
+        summary[click.buttonId] = (summary[click.buttonId] || 0) + 1;
+      }
+
+      const payload = {
+        sessionId: msg.sessionId || state.classPin || "SESSION",
+        exportedAt: nowMs(),
+        panelId: panel.config?.panelId || null,
+        language: panel.config?.language || "de",
+        correctionLevel: Number(panel.config?.correctionLevel ?? 70),
+        status: panel.status,
+        buttons: panel.config?.buttons || [],
+        clicks: panel.clicks,
+        summary,
+      };
+
+      send(ws, {
+        type: "export_actions_json",
+        payload,
+      });
+      return;
+    }
+
+    if (meta.role === "teacher" && msg.type === "teacher_end_session") {
+
+      state.sessionAlive = false;
+
+      state.actionsPanel = {
+        config: null,
+        status: "closed",
+        clicks: [],
+      };
+
+      state.round = null;
+      state.submissions.clear();
+
+      broadcastAll({
+       type: "session_end"
+      });
+
+      return;
+    }
+
+    // --- STUDENT ACTIONS: ACTIONS PANEL ---
+    if (meta.role === "student" && msg.type === "student_click_action") {
+      const panel = state.actionsPanel;
+
+      if (!panel.config || panel.status !== "open") {
+        send(ws, {
+          type: "action_click_error",
+          message: "No hay panel abierto.",
+        });
+        return;
+      }
+
+      const studentId = meta.studentId;
+      const buttonId = normalizeText(msg.buttonId);
+
+      const alreadyClicked = panel.clicks.some((c) => c.studentId === studentId);
+      if (alreadyClicked) {
+        send(ws, {
+          type: "action_click_error",
+          message: "Ya hiciste una selección en esta ronda.",
+        });
+        return;
+      }
+
+      const exists = panel.config.buttons.some((b) => b.id === buttonId);
+      if (!exists) {
+        send(ws, {
+          type: "action_click_error",
+          message: "Botón inválido.",
+        });
+        return;
+      }
+
+      const click = {
+        studentId,
+        buttonId,
+        time: nowMs(),
+      };
+
+      panel.clicks.push(click);
+
+      send(ws, { type: "action_click_ok", click });
+      broadcastActionsPanelState();
+      return;
+    }
+
+    // --- STUDENT CORRECTION LEVEL ---
+    if (meta.role === "student" && msg.type === "student_set_correction_level") {
+      const rawLevel = msg.correctionLevel;
+      const level = Math.max(0, Math.min(100, Number(rawLevel) ?? 70));
+
+      const studentId = meta.studentId;
+
+      if (!state.studentCorrectionLevels) state.studentCorrectionLevels = {};
+      state.studentCorrectionLevels[studentId] = level;
+
+      console.log(`[Servidor] Guardado: ${studentId} = ${level}%  (recibido raw: ${rawLevel})`);
+
+      broadcastToRole("teacher", {
+        type: "student_correction_update",
+        studentId,
+        correctionLevel: level
+      });
+
+      broadcastActionsPanelState();
+
+      send(ws, { type: "correction_level_ok" });
+      return;
+    }
+
     // --- STUDENT SUBMIT: RACE PANEL ---
     if (meta.role === "student" && msg.type === "student_submit") {
       const round = state.round;
@@ -642,200 +850,6 @@ wss.on("connection", (ws) => {
 
       return;
     }
-
-    // --- TEACHER ACTIONS: ACTIONS PANEL ---
-    if (meta.role === "teacher" && msg.type === "teacher_set_actions_panel") {
-      const panel = msg.panel;
-
-      if (!panel?.buttons || !Array.isArray(panel.buttons) || panel.buttons.length < 1) {
-        send(ws, { type: "error", message: "Panel de acciones inválido." });
-        return;
-      }
-
-      const buttons = panel.buttons.map((b, idx) => ({
-        id: normalizeText(b.id || `btn_${idx + 1}`),
-        label: normalizeText(b.label || `Botón ${idx + 1}`),
-        key: normalizeText(b.key || ""),                    // ← importante
-        color: normalizeText(b.color || "#2563eb"),
-        priority: Number(b.priority ?? 0),
-      }));
-
-      state.actionsPanel.config = {
-        panelId: normalizeText(panel.panelId || `AP-${nowMs()}`),
-        language: normalizeText(panel.language || "de"),
-	correctionLevel: Number(panel.correctionLevel ?? 70),
-        buttons,
-      };
-      state.actionsPanel.status = "draft";
-      state.actionsPanel.clicks = [];
-
-      send(ws, {
-        type: "actions_panel_saved",
-        panel: getPublicActionsPanel(),
-      });
-
-      broadcastActionsPanelState();
-      return;
-    }
-
-    if (meta.role === "teacher" && msg.type === "teacher_open_actions_panel") {
-      if (!state.actionsPanel.config) {
-        send(ws, {
-          type: "error",
-          message: "No hay panel de acciones configurado.",
-        });
-        return;
-      }
-
-      state.actionsPanel.status = "open";
-      state.actionsPanel.clicks = [];
-
-      send(ws, {
-        type: "actions_panel_opened",
-        panel: getPublicActionsPanel(),
-      });
-
-      broadcastActionsPanelState();
-      return;
-    }
-
-    if (meta.role === "teacher" && msg.type === "teacher_close_actions_panel") {
-      if (!state.actionsPanel.config) {
-        send(ws, { type: "error", message: "No hay panel de acciones." });
-        return;
-      }
-
-      state.actionsPanel.status = "closed";
-
-      state.actionsPanel.clicks = [];
-
-      send(ws, {
-        type: "actions_panel_closed",
-        panel: getPublicActionsPanel(),
-      });
-
-      broadcastActionsPanelState();
-      return;
-    }
-
-    if (meta.role === "teacher" && msg.type === "teacher_export_actions_json") {
-      const panel = state.actionsPanel;
-
-      const summary = {};
-      for (const click of panel.clicks) {
-        summary[click.buttonId] = (summary[click.buttonId] || 0) + 1;
-      }
-
-      const payload = {
-        sessionId: msg.sessionId || state.classPin || "SESSION",
-        exportedAt: nowMs(),
-        panelId: panel.config?.panelId || null,
-        language: panel.config?.language || "de",
-  	correctionLevel: Number(panel.config?.correctionLevel ?? 70),
-        status: panel.status,
-        buttons: panel.config?.buttons || [],
-        clicks: panel.clicks,
-        summary,
-      };
-
-      send(ws, {
-        type: "export_actions_json",
-        payload,
-      });
-      return;
-    }
-
-    if (meta.role === "teacher" && msg.type === "teacher_end_session") {
-
-      state.sessionAlive = false;
-
-      // limpiar estado
-      state.actionsPanel = {
-        config: null,
-        status: "closed",
-        clicks: [],
-      };
-
-      state.round = null;
-      state.submissions.clear();
-
-      // avisar a todos
-      broadcastAll({
-       type: "session_end"
-      });
-
-      return;
-    }
-
-    // --- STUDENT ACTIONS: ACTIONS PANEL ---
-    if (meta.role === "student" && msg.type === "student_click_action") {
-      const panel = state.actionsPanel;
-
-      if (!panel.config || panel.status !== "open") {
-        send(ws, {
-          type: "action_click_error",
-          message: "No hay panel abierto.",
-        });
-        return;
-      }
-
-      const studentId = meta.studentId;
-      const buttonId = normalizeText(msg.buttonId);
-
-      const alreadyClicked = panel.clicks.some((c) => c.studentId === studentId);
-      if (alreadyClicked) {
-        send(ws, {
-          type: "action_click_error",
-          message: "Ya hiciste una selección en esta ronda.",
-        });
-        return;
-      }
-
-      const exists = panel.config.buttons.some((b) => b.id === buttonId);
-      if (!exists) {
-        send(ws, {
-          type: "action_click_error",
-          message: "Botón inválido.",
-        });
-        return;
-      }
-
-      const click = {
-        studentId,
-        buttonId,
-        time: nowMs(),
-      };
-
-      panel.clicks.push(click);
-
-      send(ws, { type: "action_click_ok", click });
-      broadcastActionsPanelState();
-      return;
-    }
-
-// --- STUDENT CORRECTION LEVEL ---
-if (meta.role === "student" && msg.type === "student_set_correction_level") {
-  const rawLevel = msg.correctionLevel;
-  const level = Math.max(0, Math.min(100, Number(rawLevel) ?? 70));   // ← cambiado
-
-  const studentId = meta.studentId;
-
-  if (!state.studentCorrectionLevels) state.studentCorrectionLevels = {};
-  state.studentCorrectionLevels[studentId] = level;
-
-  console.log(`[Servidor] Guardado: ${studentId} = ${level}%  (recibido raw: ${rawLevel})`);
-
-  broadcastToRole("teacher", {
-    type: "student_correction_update",
-    studentId,
-    correctionLevel: level
-  });
-
-  broadcastActionsPanelState();
-
-  send(ws, { type: "correction_level_ok" });
-  return;
-}
 
     // fallback
     send(ws, {

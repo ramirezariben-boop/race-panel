@@ -1,0 +1,31 @@
+<!-- 
+  Pegar este bloque en actions.html o teacher.html, 
+  dentro de cualquier .card existente o como card aparte.
+-->
+
+<div class="card">
+  <h3 style="margin-top:0; font-size:14px;">📱 Zoom — Vista de alumnos</h3>
+  <div class="btnbar">
+    <button id="btnZoomRace">🏁 Mostrar Quiz</button>
+    <button id="btnZoomActions">🎯 Mostrar Acciones</button>
+  </div>
+  <div class="small" id="zoomPanelStatus">Panel activo: —</div>
+</div>
+
+<!-- Y en el .js correspondiente, agregar: -->
+<script>
+document.getElementById("btnZoomRace").onclick = () => {
+  if (!isAuthed) return;
+  ws.send(JSON.stringify({ type: "teacher_switch_zoom_panel", panel: "race" }));
+};
+
+document.getElementById("btnZoomActions").onclick = () => {
+  if (!isAuthed) return;
+  ws.send(JSON.stringify({ type: "teacher_switch_zoom_panel", panel: "actions" }));
+};
+
+// En handleMsg, agregar:
+// if (msg.type === "zoom_panel_ok") {
+//   document.getElementById("zoomPanelStatus").textContent = `Panel activo: ${msg.panel}`;
+// }
+</script>
