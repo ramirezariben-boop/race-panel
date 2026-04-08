@@ -204,10 +204,30 @@ function broadcastActionsPanelState() {
   });
 }
 
+// --- Security headers (OWASP / Zoom Marketplace requirement) ---
+function setSecurityHeaders(res) {
+  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' https://appssdk.zoom.us",
+      "style-src 'self' 'unsafe-inline'",
+      "connect-src 'self' wss: ws:",
+      "img-src 'self' data:",
+      "frame-ancestors 'self' https://*.zoom.us https://*.zoomdev.us",
+    ].join("; ")
+  );
+}
+
 // --- Static file server ---
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   let pathname = url.pathname;
+
+  setSecurityHeaders(res);
 
   if (pathname === "/") pathname = "/teacher.html";
 
