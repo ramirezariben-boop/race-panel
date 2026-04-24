@@ -1,0 +1,35 @@
+{
+  "roundId": "Früher und heute",
+  "prompts": [
+    {
+      "label": "Medizin und Behandlung",
+      "type": "dropdown",
+      "options": ["A", "B", "C", "D"],
+      "correct": "B",
+      "points": 1
+    },
+    {
+      "label": "Arbeit und Handwerk",
+      "type": "dropdown",
+      "options": ["A", "B", "C", "D"],
+      "correct": "D",
+      "points": 1
+    },
+    {
+      "label": "Schule und Unterricht",
+      "type": "dropdown",
+      "options": ["A", "B", "C", "D"],
+      "correct": "A",
+      "points": 1
+    }
+  ],
+  "scoring": {
+    "mode": "auto",
+    "total": 3
+  },
+  "winnersPolicy": {
+    "mode": "topNPerfect",
+    "N": 3,
+    "autoClose": false
+  }
+}
