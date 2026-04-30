@@ -1,0 +1,68 @@
+{
+  "roundId": null,
+  "prompts": [
+    {
+      "label": "1",
+      "type": "text",
+      "options": null,
+      "correct": "warst",
+      "points": 0.3
+    },
+    {
+      "label": "2",
+      "type": "text",
+      "options": null,
+      "correct": "wart",
+      "points": 0.3
+    },
+    {
+      "label": "3",
+      "type": "text",
+      "options": null,
+      "correct": "hattest",
+      "points": 0.3
+    },
+    {
+      "label": "4",
+      "type": "text",
+      "options": null,
+      "correct": "hatten",
+      "points": 0.3
+    },
+    {
+      "label": "5",
+      "type": "text",
+      "options": null,
+      "correct": "musste",
+      "points": 0.3
+    },
+    {
+      "label": "6",
+      "type": "text",
+      "options": null,
+      "correct": "durftest",
+      "points": 0.3
+    },
+    {
+      "label": "7",
+      "type": "text",
+      "options": null,
+      "correct": "ging",
+      "points": 0.3
+    },
+    {
+      "label": "8",
+      "type": "text",
+      "options": null,
+      "correct": "schrieb",
+      "points": 0.3
+    }
+  ],
+  "scoring": {
+    "mode": "manual",
+    "total": 2.4
+  },
+  "winnersPolicy": {
+    "mode": "allPerfect"
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "roundId": null,
+  "prompts": [
+    {
+      "label": "1",
+      "type": "text",
+      "options": null,
+      "correct": "war",
+      "points": 0.3
+    },
+    {
+      "label": "2",
+      "type": "text",
+      "options": null,
+      "correct": "waren",
+      "points": 0.3
+    },
+    {
+      "label": "3",
+      "type": "text",
+      "options": null,
+      "correct": "hatte",
+      "points": 0.3
+    },
+    {
+      "label": "4",
+      "type": "text",
+      "options": null,
+      "correct": "hatten",
+      "points": 0.3
+    },
+    {
+      "label": "5",
+      "type": "text",
+      "options": null,
+      "correct": "konnte",
+      "points": 0.3
+    },
+    {
+      "label": "6",
+      "type": "text",
+      "options": null,
+      "correct": "wollten",
+      "points": 0.3
+    },
+    {
+      "label": "7",
+      "type": "text",
+      "options": null,
+      "correct": "lernte",
+      "points": 0.3
+    },
+    {
+      "label": "8",
+      "type": "text",
+      "options": null,
+      "correct": "kamen",
+      "points": 0.3
+    }
+  ],
+  "scoring": {
+    "mode": "manual",
+    "total": 2.4
+  },
+  "winnersPolicy": {
+    "mode": "allPerfect"
+  }
+}
