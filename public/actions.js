@@ -4,8 +4,8 @@ const authStatus = document.getElementById("authStatus");
 const teacherKeyEl = document.getElementById("teacherKey");
 const btnAuth = document.getElementById("btnAuth");
 
-const classPinEl = document.getElementById("classPin");
-const btnSetPin = document.getElementById("btnSetPin");
+const btnResetSession = document.getElementById("btnResetSession");
+const resetSessionStatus = document.getElementById("resetSessionStatus");
 
 const panelIdEl = document.getElementById("panelId");
 const correctionLevelEl = document.getElementById("correctionLevel");
@@ -92,7 +92,6 @@ function handleMsg(msg) {
   if (msg.type === "auth_ok" && msg.role === "teacher") {
     isAuthed = true;
     setStatus("Autenticado como teacher.", true);
-    if (msg.classPin) classPinEl.value = msg.classPin;
     if (msg.zoomPanel) zoomPanelStatus.textContent = `Panel Zoom activo: ${msg.zoomPanel}`;
     return;
   }
@@ -102,8 +101,10 @@ function handleMsg(msg) {
     return;
   }
 
-  if (msg.type === "pin_ok") {
-    setStatus(`PIN guardado: ${msg.classPin}`, true);
+  if (msg.type === "reset_session_ok") {
+    resetSessionStatus.textContent = "Sesión reiniciada.";
+    setStatus("Sesión reiniciada.", true);
+    resetTeacherPanelUI?.();
     return;
   }
 
@@ -129,7 +130,6 @@ function handleMsg(msg) {
 
   if (msg.type === "session_end" || msg.type === "session_expired") {
     shouldReconnect = false;
-    localStorage.removeItem("classPin");
     setStatus("Sesión finalizada.");
     resetTeacherPanelUI?.();
     if (ws) ws.close();
@@ -388,13 +388,9 @@ btnAuth.onclick = () => {
   ws.send(JSON.stringify({ type: "auth_teacher", teacherKey: key }));
 };
 
-btnSetPin.onclick = () => {
+btnResetSession.onclick = () => {
   if (!isAuthed) return setStatus("Primero autentícate.");
-  const newPin = classPinEl.value.trim();
-  if (!newPin) return setStatus("PIN inválido");
-  localStorage.setItem("classPin", newPin);
-  ws.send(JSON.stringify({ type: "teacher_set_pin", classPin: newPin }));
-  resetTeacherPanelUI();
+  ws.send(JSON.stringify({ type: "teacher_reset_session" }));
 };
 
 btnZoomActions.onclick = () => {
@@ -429,7 +425,7 @@ btnExportActions.onclick = () => {
   if (!isAuthed) return setStatus("Primero autentícate.");
   ws.send(JSON.stringify({
     type: "teacher_export_actions_json",
-    sessionId: classPinEl.value || "SESSION"
+    sessionId: "SESSION"
   }));
 };
 
@@ -448,9 +444,7 @@ btnEndSession.onclick = () => {
 // =============== RESTAURAR AL CARGAR ============
 function restoreTeacherSession() {
   const savedKey = localStorage.getItem("teacherKey");
-  const savedPin = localStorage.getItem("classPin");
   if (savedKey) teacherKeyEl.value = savedKey;
-  if (savedPin) classPinEl.value = savedPin;
 }
 
 function tryAutoAuthTeacher() {

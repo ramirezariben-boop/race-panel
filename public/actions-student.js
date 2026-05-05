@@ -2,7 +2,6 @@ const wsInfo = document.getElementById("wsInfo");
 const loginStatus = document.getElementById("loginStatus");
 
 const studentIdEl = document.getElementById("studentId");
-const classPinEl = document.getElementById("classPin");
 const btnLogin = document.getElementById("btnLogin");
 
 const loginCard = document.getElementById("loginCard");
@@ -132,7 +131,6 @@ function handleMsg(msg) {
 
     alert("La sesión ha terminado.");
 
-    localStorage.removeItem("classPin");
     localStorage.removeItem("studentId");
 
     if (ws) ws.close();
@@ -199,28 +197,25 @@ function renderPanel(panel) {
 
 btnLogin.onclick = () => {
   const studentId = (studentIdEl.value || "").trim();
-  const classPin = (classPinEl.value || "").trim();
-  if (!studentId || !classPin) {
-    return setStatus("Faltan Student ID o PIN");
+  if (!studentId) {
+    return setStatus("Falta Student ID");
   }
 
   localStorage.setItem("studentId", studentId);
-  localStorage.setItem("classPin", classPin);
 
-  ws.send(JSON.stringify({ type: "auth_student", studentId, classPin }));
+  ws.send(JSON.stringify({ type: "auth_student", studentId }));
 };
 
 function tryAutoLogin() {
   const studentId = localStorage.getItem("studentId");
-  const classPin = localStorage.getItem("classPin");
 
-  if (studentId && classPin && ws && ws.readyState === 1) {
+  if (studentId && ws && ws.readyState === 1) {
     console.log("[AUTOLOGIN] student", studentId);
+    studentIdEl.value = studentId;
 
     ws.send(JSON.stringify({
       type: "auth_student",
       studentId,
-      classPin
     }));
   }
 }

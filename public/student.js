@@ -2,7 +2,6 @@ const wsInfo = document.getElementById("wsInfo");
 
 const loginCard = document.getElementById("loginCard");
 const studentIdEl = document.getElementById("studentId");
-const classPinEl = document.getElementById("classPin");
 const btnLogin = document.getElementById("btnLogin");
 const loginStatus = document.getElementById("loginStatus");
 
@@ -48,7 +47,10 @@ function connectWS() {
   ws = new WebSocket(wsUrl());
   wsInfo.textContent = `WS: conectando…`;
 
-  ws.onopen = () => (wsInfo.textContent = `WS: conectado`);
+  ws.onopen = () => {
+    wsInfo.textContent = `WS: conectado`;
+    tryAutoLogin();
+  };
   ws.onclose = () => {
     wsInfo.textContent = `WS: desconectado`;
     setSubmitStatus("Desconectado. Recarga la página.", "error");
@@ -68,6 +70,7 @@ function handleMsg(msg) {
   if (msg.type === "auth_ok" && msg.role === "student") {
     isAuthed = true;
     myId = msg.studentId;
+    localStorage.setItem("studentId", myId);
     setLoginStatus(`Autenticado: ID ${myId}`, true);
     loginCard.style.display = "none";
     roundCard.style.display = "block";
@@ -176,9 +179,16 @@ function collectAnswers() {
 // events
 btnLogin.onclick = () => {
   const studentId = normalize(studentIdEl.value);
-  const classPin = normalize(classPinEl.value);
-  ws.send(JSON.stringify({ type: "auth_student", studentId, classPin }));
+  ws.send(JSON.stringify({ type: "auth_student", studentId }));
 };
+
+function tryAutoLogin() {
+  const savedId = localStorage.getItem("studentId");
+  if (savedId && ws && ws.readyState === 1) {
+    studentIdEl.value = savedId;
+    ws.send(JSON.stringify({ type: "auth_student", studentId: savedId }));
+  }
+}
 
 btnSubmit.onclick = () => {
   if (!round || round.status !== "open") return;

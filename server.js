@@ -326,10 +326,15 @@ wss.on("connection", (ws) => {
 
       state.clients.set(ws, { role: "teacher" });
 
+      // Refrescar sesión al autenticarse el profesor
+      if (!state.sessionAlive) {
+        state.sessionAlive = true;
+        state.sessionCreatedAt = nowMs();
+      }
+
       send(ws, {
         type: "auth_ok",
         role: "teacher",
-        classPin: state.classPin,
         round: getPublicRound(state.round),
         zoomPanel: state.zoomPanel,
       });
@@ -352,16 +357,9 @@ wss.on("connection", (ws) => {
         return;
       }
       const studentId = normalizeText(msg.studentId);
-      const classPin = normalizeText(msg.classPin);
 
       if (!studentId) {
         send(ws, { type: "auth_error", message: "Falta studentId." });
-        return;
-      }
-
-      // Si viene con classPin, validarlo; si no (contexto Zoom), saltar validación
-      if (classPin && classPin !== state.classPin) {
-        send(ws, { type: "auth_error", message: "PIN incorrecto." });
         return;
       }
 
@@ -383,7 +381,7 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    // --- SET PIN (RESET SESIÓN) ---
+    // --- SET PIN (RESET SESIÓN) — mantenido por compatibilidad ---
     if (msg.type === "teacher_set_pin") {
 
       const meta = state.clients.get(ws);
@@ -407,7 +405,6 @@ wss.on("connection", (ws) => {
 
       state.submissions.clear();
 
-      // RESET TOTAL DEL PANEL DE ACCIONES
       state.actionsPanel = {
         status: "close",
         config: null,
@@ -419,6 +416,38 @@ wss.on("connection", (ws) => {
         classPin: state.classPin
       });
 
+      broadcastAll({
+        type: "actions_panel_state",
+        panel: getPublicActionsPanel(),
+      });
+
+      return;
+    }
+
+    // --- RESET SESIÓN (sin PIN) ---
+    if (msg.type === "teacher_reset_session") {
+
+      const meta = state.clients.get(ws);
+
+      if (!meta || meta.role !== "teacher") {
+        send(ws, { type: "error", message: "No autorizado." });
+        return;
+      }
+
+      state.sessionAlive = true;
+      state.sessionCreatedAt = nowMs();
+      state.submissions.clear();
+      state.round = null;
+
+      state.actionsPanel = {
+        status: "closed",
+        config: null,
+        clicks: [],
+      };
+
+      send(ws, { type: "reset_session_ok" });
+
+      broadcastRoundState();
       broadcastAll({
         type: "actions_panel_state",
         panel: getPublicActionsPanel(),

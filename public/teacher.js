@@ -4,8 +4,8 @@ const authStatus = document.getElementById("authStatus");
 const teacherKeyEl = document.getElementById("teacherKey");
 const btnAuth = document.getElementById("btnAuth");
 
-const classPinEl = document.getElementById("classPin");
-const btnSetPin = document.getElementById("btnSetPin");
+const btnResetSession = document.getElementById("btnResetSession");
+const resetSessionStatus = document.getElementById("resetSessionStatus");
 
 const pointsModeEl = document.getElementById("pointsMode");
 const totalRoundPointsEl = document.getElementById("totalRoundPoints");
@@ -98,7 +98,6 @@ function handleMsg(msg) {
   if (msg.type === "auth_ok" && msg.role === "teacher") {
     isAuthed = true;
     setStatus("Autenticado como teacher.", "ok");
-    if (msg.classPin) classPinEl.value = msg.classPin;
     if (msg.round) applyRoundState(msg.round);
     if (msg.zoomPanel) zoomPanelStatus.textContent = `Panel Zoom activo: ${msg.zoomPanel}`;
     return;
@@ -109,8 +108,12 @@ function handleMsg(msg) {
     return;
   }
 
-  if (msg.type === "pin_ok") {
-    setStatus(`PIN guardado: ${msg.classPin}`, "ok");
+  if (msg.type === "reset_session_ok") {
+    resetSessionStatus.textContent = "Sesión reiniciada.";
+    subCountEl.textContent = "0";
+    winnerIdsEl.textContent = "—";
+    resultsArea.innerHTML = "";
+    setStatus("Sesión reiniciada.", "ok");
     return;
   }
 
@@ -347,9 +350,9 @@ btnAuth.onclick = () => {
   ws.send(JSON.stringify({ type: "auth_teacher", teacherKey: key }));
 };
 
-btnSetPin.onclick = () => {
+btnResetSession.onclick = () => {
   if (!isAuthed) return setStatus("Primero autentícate.", "error");
-  ws.send(JSON.stringify({ type: "teacher_set_pin", classPin: classPinEl.value }));
+  ws.send(JSON.stringify({ type: "teacher_reset_session" }));
 };
 
 btnZoomRace.onclick = () => {
@@ -409,14 +412,14 @@ btnReset.onclick = () => {
 btnExport.onclick = () => {
   ws.send(JSON.stringify({
     type: "teacher_export_json",
-    sessionId: classPinEl.value || "SESSION",
+    sessionId: "SESSION",
   }));
 };
 
 btnExportExtras.onclick = () => {
   ws.send(JSON.stringify({
     type: "teacher_export_extras",
-    sessionId: classPinEl.value || "SESSION",
+    sessionId: "SESSION",
     minPoints: 1
   }));
 };
